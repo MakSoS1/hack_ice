@@ -20,7 +20,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from app.palette import load_palette
 from app.scene_index import SceneIndex
-from ml.dataset import SceneTemporalDataset
+from ml.dataset import SceneTemporalDataset, collate_scene_samples
 from ml.metrics import evaluate_segmentation
 from ml.model import TemporalUNet
 
@@ -44,6 +44,9 @@ class TrainConfig:
     focal_gamma: float
     base_channels: int
     train_workers: int
+    grad_accum: int
+    synthetic_gap_prob: float
+    norm: str
 
 
 def parse_common_args(default_subset: int, default_epochs: int) -> TrainConfig:
@@ -53,9 +56,9 @@ def parse_common_args(default_subset: int, default_epochs: int) -> TrainConfig:
     parser.add_argument("--palette", type=Path, default=ROOT / "configs" / "ice_palette.json")
     parser.add_argument("--output", type=Path, default=ROOT / "backend" / "checkpoints" / "mvp_unet.pt")
     parser.add_argument("--output-metrics", type=Path, default=ROOT / "storage" / "reports" / "train_metrics.json")
-    parser.add_argument("--history-steps", type=int, default=2)
-    parser.add_argument("--crop-size", type=int, default=512)
-    parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--history-steps", type=int, default=1)
+    parser.add_argument("--crop-size", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=default_epochs)
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--subset-size", type=int, default=default_subset)
@@ -63,8 +66,11 @@ def parse_common_args(default_subset: int, default_epochs: int) -> TrainConfig:
     parser.add_argument("--val-ratio", type=float, default=0.15)
     parser.add_argument("--gap-loss-weight", type=float, default=4.0)
     parser.add_argument("--focal-gamma", type=float, default=2.0)
-    parser.add_argument("--base-channels", type=int, default=32)
+    parser.add_argument("--base-channels", type=int, default=16)
     parser.add_argument("--workers", type=int, default=0)
+    parser.add_argument("--grad-accum", type=int, default=4)
+    parser.add_argument("--synthetic-gap-prob", type=float, default=0.65)
+    parser.add_argument("--norm", type=str, choices=["batch", "group"], default="group")
     args = parser.parse_args()
 
     return TrainConfig(
@@ -85,6 +91,9 @@ def parse_common_args(default_subset: int, default_epochs: int) -> TrainConfig:
         focal_gamma=float(max(0.0, args.focal_gamma)),
         base_channels=int(max(16, args.base_channels)),
         train_workers=max(0, int(args.workers)),
+        grad_accum=max(1, int(args.grad_accum)),
+        synthetic_gap_prob=float(np.clip(args.synthetic_gap_prob, 0.0, 1.0)),
+        norm=str(args.norm),
     )
 
 
@@ -285,6 +294,7 @@ def train_model(cfg: TrainConfig) -> None:
         gap_focus_prob=0.85,
         augment=True,
         seed=cfg.seed,
+        synthetic_gap_prob=cfg.synthetic_gap_prob,
     )
     val_ds = SceneTemporalDataset(
         scene_index=scene_index,
@@ -296,6 +306,7 @@ def train_model(cfg: TrainConfig) -> None:
         gap_focus_prob=0.0,
         augment=False,
         seed=cfg.seed + 7,
+        synthetic_gap_prob=1.0,
     )
 
     train_loader = DataLoader(
@@ -304,6 +315,7 @@ def train_model(cfg: TrainConfig) -> None:
         shuffle=True,
         num_workers=cfg.train_workers,
         pin_memory=True,
+        collate_fn=collate_scene_samples,
     )
     val_loader = DataLoader(
         val_ds,
@@ -311,6 +323,7 @@ def train_model(cfg: TrainConfig) -> None:
         shuffle=False,
         num_workers=cfg.train_workers,
         pin_memory=True,
+        collate_fn=collate_scene_samples,
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -319,6 +332,7 @@ def train_model(cfg: TrainConfig) -> None:
         in_channels=in_channels,
         num_classes=len(palette.class_ids),
         base_channels=cfg.base_channels,
+        norm=cfg.norm,
     ).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=1e-4)
     scaler = torch.amp.GradScaler(device="cuda", enabled=device.type == "cuda")
@@ -334,26 +348,28 @@ def train_model(cfg: TrainConfig) -> None:
     for epoch in range(cfg.epochs):
         model.train()
         train_losses: list[float] = []
-        for batch in train_loader:
+        opt.zero_grad(set_to_none=True)
+        for step, batch in enumerate(train_loader):
             x = batch.x.to(device, non_blocking=True)
             y = batch.y.to(device, non_blocking=True)
             gap = batch.gap_mask.to(device, non_blocking=True)
             conf_t = batch.confidence_target.to(device, non_blocking=True)
 
-            opt.zero_grad(set_to_none=True)
             with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
                 logits, conf_p = model(x)
                 focal = focal_ce_loss(logits, y, gamma=cfg.focal_gamma)
                 weighted = focal * (1.0 + cfg.gap_loss_weight * gap)
                 loss_cls = torch.mean(weighted)
                 loss_dice = masked_multiclass_dice_loss(logits, y, gap)
-                conf_w = 1.0 + 2.0 * gap.unsqueeze(1)
-                loss_conf = torch.mean(F.binary_cross_entropy(conf_p, conf_t, reduction="none") * conf_w)
-                loss = loss_cls + 0.45 * loss_dice + 0.25 * loss_conf
+            conf_w = 1.0 + 2.0 * gap.unsqueeze(1)
+            loss_conf = torch.mean(F.binary_cross_entropy(conf_p.float(), conf_t.float(), reduction="none") * conf_w.float())
+            loss = loss_cls + 0.45 * loss_dice + 0.25 * loss_conf
 
-            scaler.scale(loss).backward()
-            scaler.step(opt)
-            scaler.update()
+            scaler.scale(loss / float(cfg.grad_accum)).backward()
+            if (step + 1) % cfg.grad_accum == 0 or (step + 1) == len(train_loader):
+                scaler.step(opt)
+                scaler.update()
+                opt.zero_grad(set_to_none=True)
             train_losses.append(float(loss.item()))
 
         val_loss, val_metrics = evaluate(
@@ -395,6 +411,7 @@ def train_model(cfg: TrainConfig) -> None:
                     "palette_ids": palette.class_ids.tolist(),
                     "in_channels": in_channels,
                     "base_channels": cfg.base_channels,
+                    "norm": cfg.norm,
                     "best_key": best_key,
                     "best_metrics": val_metrics,
                     "train_config": {
@@ -403,6 +420,8 @@ def train_model(cfg: TrainConfig) -> None:
                         "gap_loss_weight": cfg.gap_loss_weight,
                         "focal_gamma": cfg.focal_gamma,
                         "seed": cfg.seed,
+                        "grad_accum": cfg.grad_accum,
+                        "synthetic_gap_prob": cfg.synthetic_gap_prob,
                     },
                 },
                 cfg.output_checkpoint,
@@ -424,6 +443,9 @@ def train_model(cfg: TrainConfig) -> None:
                         "lr": cfg.lr,
                         "subset_size": cfg.subset_size,
                         "seed": cfg.seed,
+                        "grad_accum": cfg.grad_accum,
+                        "synthetic_gap_prob": cfg.synthetic_gap_prob,
+                        "norm": cfg.norm,
                     },
                     "train_size": len(train_ids),
                     "val_size": len(val_ids),

@@ -21,6 +21,10 @@ class JobManager:
         storage_dir: Path,
         preview_max_width: int,
         route_grid_size: int,
+        model_checkpoint_path: Path,
+        model_device: str,
+        model_input_size: int,
+        model_tile_overlap: int,
         workers: int = 2,
     ):
         self.db = db
@@ -29,6 +33,10 @@ class JobManager:
         self.storage_dir = storage_dir
         self.preview_max_width = preview_max_width
         self.route_grid_size = route_grid_size
+        self.model_checkpoint_path = model_checkpoint_path
+        self.model_device = model_device
+        self.model_input_size = model_input_size
+        self.model_tile_overlap = model_tile_overlap
         self.executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="recon")
 
     def submit_reconstruction(self, job_id: str, *, scene_id: str, history_steps: int, model_mode: str, aoi_bbox: list[float] | None) -> None:
@@ -62,6 +70,10 @@ class JobManager:
                 model_mode=model_mode,
                 preview_max_width=self.preview_max_width,
                 route_grid_size=self.route_grid_size,
+                model_checkpoint_path=self.model_checkpoint_path,
+                model_device=self.model_device,
+                model_input_size=self.model_input_size,
+                model_tile_overlap=self.model_tile_overlap,
             )
 
             self.db.update_job(job_id, progress=0.95)

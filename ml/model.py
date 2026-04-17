@@ -4,6 +4,15 @@ import torch
 import torch.nn as nn
 
 
+def _make_norm(norm: str, channels: int) -> nn.Module:
+    if norm == "group":
+        groups = min(8, channels)
+        while groups > 1 and channels % groups != 0:
+            groups -= 1
+        return nn.GroupNorm(num_groups=max(1, groups), num_channels=channels)
+    return nn.BatchNorm2d(channels)
+
+
 class SEBlock(nn.Module):
     def __init__(self, channels: int, reduction: int = 8):
         super().__init__()
@@ -22,20 +31,20 @@ class SEBlock(nn.Module):
 
 
 class ResidualConvBlock(nn.Module):
-    def __init__(self, in_ch: int, out_ch: int, *, dilation: int = 1):
+    def __init__(self, in_ch: int, out_ch: int, *, dilation: int = 1, norm: str = "batch"):
         super().__init__()
         pad = dilation
         self.conv1 = nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=pad, dilation=dilation, bias=False)
-        self.bn1 = nn.BatchNorm2d(out_ch)
+        self.bn1 = _make_norm(norm, out_ch)
         self.conv2 = nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_ch)
+        self.bn2 = _make_norm(norm, out_ch)
         self.act = nn.ReLU(inplace=True)
         self.se = SEBlock(out_ch, reduction=8)
 
         if in_ch != out_ch:
             self.skip = nn.Sequential(
                 nn.Conv2d(in_ch, out_ch, kernel_size=1, bias=False),
-                nn.BatchNorm2d(out_ch),
+                _make_norm(norm, out_ch),
             )
         else:
             self.skip = nn.Identity()
@@ -50,14 +59,14 @@ class ResidualConvBlock(nn.Module):
 
 
 class MultiScaleBottleneck(nn.Module):
-    def __init__(self, channels: int):
+    def __init__(self, channels: int, norm: str = "batch"):
         super().__init__()
-        self.b1 = ResidualConvBlock(channels, channels, dilation=1)
-        self.b2 = ResidualConvBlock(channels, channels, dilation=2)
-        self.b3 = ResidualConvBlock(channels, channels, dilation=3)
+        self.b1 = ResidualConvBlock(channels, channels, dilation=1, norm=norm)
+        self.b2 = ResidualConvBlock(channels, channels, dilation=2, norm=norm)
+        self.b3 = ResidualConvBlock(channels, channels, dilation=3, norm=norm)
         self.fuse = nn.Sequential(
             nn.Conv2d(channels * 3, channels, kernel_size=1, bias=False),
-            nn.BatchNorm2d(channels),
+            _make_norm(norm, channels),
             nn.ReLU(inplace=True),
             nn.Dropout2d(p=0.15),
         )
@@ -72,30 +81,30 @@ class MultiScaleBottleneck(nn.Module):
 class TemporalUNet(nn.Module):
     """Accuracy-oriented temporal U-Net for 8GB VRAM training."""
 
-    def __init__(self, in_channels: int, num_classes: int, base_channels: int = 32):
+    def __init__(self, in_channels: int, num_classes: int, base_channels: int = 32, norm: str = "batch"):
         super().__init__()
         c = base_channels
 
-        self.enc1 = ResidualConvBlock(in_channels, c)
+        self.enc1 = ResidualConvBlock(in_channels, c, norm=norm)
         self.pool1 = nn.MaxPool2d(2)
-        self.enc2 = ResidualConvBlock(c, c * 2)
+        self.enc2 = ResidualConvBlock(c, c * 2, norm=norm)
         self.pool2 = nn.MaxPool2d(2)
-        self.enc3 = ResidualConvBlock(c * 2, c * 4)
+        self.enc3 = ResidualConvBlock(c * 2, c * 4, norm=norm)
         self.pool3 = nn.MaxPool2d(2)
 
-        self.bridge_in = ResidualConvBlock(c * 4, c * 8)
-        self.bridge_ms = MultiScaleBottleneck(c * 8)
+        self.bridge_in = ResidualConvBlock(c * 4, c * 8, norm=norm)
+        self.bridge_ms = MultiScaleBottleneck(c * 8, norm=norm)
 
         self.up3 = nn.ConvTranspose2d(c * 8, c * 4, kernel_size=2, stride=2)
-        self.dec3 = ResidualConvBlock(c * 8, c * 4)
+        self.dec3 = ResidualConvBlock(c * 8, c * 4, norm=norm)
         self.up2 = nn.ConvTranspose2d(c * 4, c * 2, kernel_size=2, stride=2)
-        self.dec2 = ResidualConvBlock(c * 4, c * 2)
+        self.dec2 = ResidualConvBlock(c * 4, c * 2, norm=norm)
         self.up1 = nn.ConvTranspose2d(c * 2, c, kernel_size=2, stride=2)
-        self.dec1 = ResidualConvBlock(c * 2, c)
+        self.dec1 = ResidualConvBlock(c * 2, c, norm=norm)
 
         self.class_head = nn.Sequential(
             nn.Conv2d(c, c, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(c),
+            _make_norm(norm, c),
             nn.ReLU(inplace=True),
             nn.Conv2d(c, num_classes, kernel_size=1),
         )

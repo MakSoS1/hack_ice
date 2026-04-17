@@ -56,6 +56,10 @@ def _build_app_state(settings: Settings) -> AppState:
         storage_dir=settings.storage_dir,
         preview_max_width=settings.preview_max_width,
         route_grid_size=settings.route_grid_size,
+        model_checkpoint_path=settings.model_checkpoint_path,
+        model_device=settings.model_device,
+        model_input_size=settings.model_input_size,
+        model_tile_overlap=settings.model_tile_overlap,
         workers=2,
     )
     return AppState(settings=settings, db=db, palette=palette, scene_index=scene_index, job_manager=job_manager)

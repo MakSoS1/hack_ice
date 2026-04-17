@@ -14,6 +14,7 @@ if (!(Test-Path ".venv")) {
 
 & ".\.venv\Scripts\python.exe" -m pip install --upgrade pip
 & ".\.venv\Scripts\pip.exe" install -r .\backend\requirements.txt
+& ".\.venv\Scripts\pip.exe" install pytest
 
 Write-Host "[3/6] Install ML deps (PyTorch)"
 try {
@@ -25,7 +26,7 @@ try {
 
 Write-Host "[4/6] Frontend deps"
 Set-Location "$ProjectRoot\frontend"
-npm install
+npm.cmd install
 
 Write-Host "[5/6] Ensure storage dirs"
 Set-Location $ProjectRoot

@@ -33,6 +33,7 @@ class SceneTemporalDataset(Dataset[SceneSample]):
         gap_focus_prob: float = 0.8,
         augment: bool = False,
         seed: int = 42,
+        synthetic_gap_prob: float = 0.0,
     ):
         self.scene_index = scene_index
         self.palette = palette
@@ -42,6 +43,7 @@ class SceneTemporalDataset(Dataset[SceneSample]):
         self.random_crop = random_crop
         self.gap_focus_prob = float(np.clip(gap_focus_prob, 0.0, 1.0))
         self.augment = augment
+        self.synthetic_gap_prob = float(np.clip(synthetic_gap_prob, 0.0, 1.0))
 
         self.max_class = max(1.0, float(np.max(self.palette.class_ids)))
         self.rng = random.Random(seed)
@@ -59,6 +61,11 @@ class SceneTemporalDataset(Dataset[SceneSample]):
         cur_rgb = self._read_ice(rec.iceclass_path)
         cur_cls = self.palette.rgb_to_class_ids(cur_rgb)
         cur_gap = self._resize(self.scene_index.read_gap_mask(scene_id), cur_cls.shape)
+        eff_gap = cur_gap
+        if self.synthetic_gap_prob > 0.0 and self.rng.random() < self.synthetic_gap_prob:
+            syn_gap = self._sample_synthetic_gap(cur_shape=cur_cls.shape, base_gap=cur_gap, scene_id=scene_id)
+            if int(np.sum(syn_gap)) > 0:
+                eff_gap = syn_gap
 
         history_cls: list[np.ndarray] = []
         history_gap: list[np.ndarray] = []
@@ -76,13 +83,13 @@ class SceneTemporalDataset(Dataset[SceneSample]):
             history_gap.append(cur_gap)
 
         current_observed = cur_cls.copy()
-        current_observed[cur_gap == 1] = self.palette.unknown_id
+        current_observed[eff_gap == 1] = self.palette.unknown_id
 
         # Crop with preference for masked areas to optimize accuracy where it matters.
         cur_crop, target_crop, gap_crop, hist_cls_crop, hist_gap_crop = self._crop_pack(
             current_observed=current_observed,
             target=cur_cls,
-            gap=cur_gap,
+            gap=eff_gap,
             hist_cls=history_cls,
             hist_gap=history_gap,
         )
@@ -248,3 +255,34 @@ class SceneTemporalDataset(Dataset[SceneSample]):
         h, w = int(shape_hw[0]), int(shape_hw[1])
         out = cv2.resize(arr.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST)
         return out
+
+    def _sample_synthetic_gap(self, *, cur_shape: tuple[int, int], base_gap: np.ndarray, scene_id: str) -> np.ndarray:
+        min_pixels = max(128, int(0.004 * cur_shape[0] * cur_shape[1]))
+        if len(self.scene_ids) <= 1:
+            return np.zeros(cur_shape, dtype=np.uint8)
+
+        for _ in range(8):
+            donor_id = self.scene_ids[self.rng.randrange(len(self.scene_ids))]
+            if donor_id == scene_id:
+                continue
+            donor_gap = self._resize(self.scene_index.read_gap_mask(donor_id), cur_shape)
+            syn = ((donor_gap == 1) & (base_gap == 0)).astype(np.uint8)
+            if int(np.sum(syn)) >= min_pixels:
+                return syn
+
+        # fallback: shifted existing mask
+        shift_y = max(1, cur_shape[0] // 9)
+        shift_x = max(1, cur_shape[1] // 11)
+        syn = np.roll(base_gap, shift=(shift_y, shift_x), axis=(0, 1))
+        syn = ((syn == 1) & (base_gap == 0)).astype(np.uint8)
+        if int(np.sum(syn)) >= min_pixels:
+            return syn
+        return np.zeros(cur_shape, dtype=np.uint8)
+
+
+def collate_scene_samples(samples: list[SceneSample]) -> SceneSample:
+    xs = torch.stack([s.x for s in samples], dim=0)
+    ys = torch.stack([s.y for s in samples], dim=0)
+    gaps = torch.stack([s.gap_mask for s in samples], dim=0)
+    confs = torch.stack([s.confidence_target for s in samples], dim=0)
+    return SceneSample(x=xs, y=ys, gap_mask=gaps, confidence_target=confs)

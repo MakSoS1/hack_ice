@@ -68,6 +68,8 @@ class LayerManifestResponse(BaseModel):
 class LayerSummaryResponse(BaseModel):
     layer_id: str
     scene_id: str
+    model_mode_requested: str | None = None
+    model_mode_effective: str | None = None
     coverage_before: float
     coverage_after: float
     restored_area_km2: float

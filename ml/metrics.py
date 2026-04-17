@@ -17,6 +17,10 @@ class SegmentationMetrics:
     recovered_ratio: float
     confidence_brier: float
     confidence_ece: float
+    per_class_f1: dict[str, float]
+    per_class_iou: dict[str, float]
+    confusion_matrix: list[list[int]]
+    business_cost_mae: float
 
 
 def _safe_div(a: float, b: float) -> float:
@@ -66,6 +70,26 @@ def _macro_f1_iou_from_cm(cm: np.ndarray) -> tuple[float, float]:
         f1s.append(f1)
         ious.append(iou)
     return (float(np.mean(f1s)) if f1s else 0.0, float(np.mean(ious)) if ious else 0.0)
+
+
+def _per_class_from_cm(cm: np.ndarray, class_ids: np.ndarray) -> tuple[dict[str, float], dict[str, float]]:
+    out_f1: dict[str, float] = {}
+    out_iou: dict[str, float] = {}
+    for i, cid in enumerate(class_ids.tolist()):
+        tp = float(cm[i, i])
+        fp = float(np.sum(cm[:, i]) - tp)
+        fn = float(np.sum(cm[i, :]) - tp)
+        support = float(np.sum(cm[i, :]))
+        key = str(int(cid))
+        if support <= 0:
+            out_f1[key] = 0.0
+            out_iou[key] = 0.0
+            continue
+        p = _safe_div(tp, tp + fp)
+        r = _safe_div(tp, tp + fn)
+        out_f1[key] = _safe_div(2.0 * p * r, p + r)
+        out_iou[key] = _safe_div(tp, tp + fp + fn)
+    return out_f1, out_iou
 
 
 def _edge_mask(classes: np.ndarray) -> np.ndarray:
@@ -118,6 +142,7 @@ def evaluate_segmentation(
     gap_mask: np.ndarray,
     class_ids: np.ndarray,
     confidence: np.ndarray | None = None,
+    class_costs: np.ndarray | None = None,
 ) -> SegmentationMetrics:
     if y_true.shape != y_pred.shape:
         raise ValueError("y_true and y_pred must have the same shape")
@@ -136,6 +161,7 @@ def evaluate_segmentation(
     masked_correct = float(np.sum((y_true == y_pred) & masked))
     masked_acc = _safe_div(masked_correct, total_masked)
     macro_f1, miou = _macro_f1_iou_from_cm(cm)
+    per_class_f1, per_class_iou = _per_class_from_cm(cm, class_ids)
 
     edge = _edge_mask(y_true)
     edge_masked = edge & masked
@@ -156,6 +182,15 @@ def evaluate_segmentation(
     corr_masked = (y_true[masked] == y_pred[masked]).astype(np.float32)
     brier, ece = _confidence_scores(corr_masked, conf_masked)
 
+    business_cost_mae = 0.0
+    if class_costs is not None:
+        class_costs = np.asarray(class_costs, dtype=np.float32)
+        valid = masked & (y_true_idx >= 0) & (y_pred_idx >= 0)
+        if np.any(valid):
+            tc = class_costs[y_true_idx[valid]]
+            pc = class_costs[y_pred_idx[valid]]
+            business_cost_mae = float(np.mean(np.abs(tc - pc)))
+
     return SegmentationMetrics(
         masked_accuracy=float(masked_acc),
         masked_macro_f1=float(macro_f1),
@@ -166,4 +201,8 @@ def evaluate_segmentation(
         recovered_ratio=float(recovered_ratio),
         confidence_brier=float(brier),
         confidence_ece=float(ece),
+        per_class_f1=per_class_f1,
+        per_class_iou=per_class_iou,
+        confusion_matrix=cm.tolist(),
+        business_cost_mae=float(business_cost_mae),
     )

@@ -16,6 +16,7 @@ class IceClassPalette:
     unknown_id: int
     unknown_rgb: np.ndarray
     unknown_cost: float
+    nearest_tolerance: int = 0
 
     def rgb_to_class_ids(self, rgb: np.ndarray) -> np.ndarray:
         if rgb.ndim != 3 or rgb.shape[-1] != 3:
@@ -35,9 +36,16 @@ class IceClassPalette:
             if key in mapping:
                 out_unique[i] = mapping[key]
                 continue
-            # Fallback: nearest palette color by Euclidean distance in RGB space.
+            # By default we keep unknown color strictness to avoid silent class drift.
+            if self.nearest_tolerance <= 0:
+                out_unique[i] = np.uint8(self.unknown_id)
+                continue
             d = np.sum((self.class_rgbs.astype(np.float32) - color.astype(np.float32)) ** 2, axis=1)
-            out_unique[i] = self.class_ids[int(np.argmin(d))]
+            nearest_idx = int(np.argmin(d))
+            if float(d[nearest_idx]) <= float(self.nearest_tolerance * self.nearest_tolerance):
+                out_unique[i] = self.class_ids[nearest_idx]
+            else:
+                out_unique[i] = np.uint8(self.unknown_id)
 
         out = out_unique[inv].reshape(rgb.shape[:2])
         return out
@@ -72,6 +80,7 @@ def load_palette(config_path: Path) -> IceClassPalette:
     class_costs = np.array([float(c["cost"]) for c in classes], dtype=np.float32)
 
     unknown = raw.get("unknown_class", {"id": 255, "rgb": [0, 0, 0], "cost": 9.0})
+    nearest_tolerance = int(raw.get("nearest_tolerance", 0))
 
     return IceClassPalette(
         class_ids=class_ids,
@@ -81,4 +90,5 @@ def load_palette(config_path: Path) -> IceClassPalette:
         unknown_id=int(unknown.get("id", 255)),
         unknown_rgb=np.array(unknown.get("rgb", [0, 0, 0]), dtype=np.uint8),
         unknown_cost=float(unknown.get("cost", 9.0)),
+        nearest_tolerance=max(0, nearest_tolerance),
     )

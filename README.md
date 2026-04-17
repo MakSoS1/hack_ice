@@ -38,7 +38,7 @@ cd C:\Users\maksi\projects\vizard-arctic\backend
 
 ```powershell
 cd C:\Users\maksi\projects\vizard-arctic\frontend
-npm run dev -- --host 0.0.0.0 --port 8080
+npm.cmd run dev -- --host 0.0.0.0 --port 8080
 ```
 
 Set API URL for frontend with:
@@ -59,6 +59,17 @@ setx VITE_API_BASE_URL http://127.0.0.1:8000
 
 ## ML scripts
 
+### Recommended RTX 2060 SUPER training profile
+
+The training defaults are tuned for 8GB VRAM:
+- `crop_size=256`
+- `batch_size=1`
+- `grad_accum=4`
+- `base_channels=16`
+- `history_steps=1`
+- `norm=group`
+- synthetic gap masking enabled for masked-area validation
+
 Dataset audit (scene naming, geometry, gap distribution, class histogram):
 
 ```powershell
@@ -70,25 +81,25 @@ Accuracy-oriented MVP training on representative subset:
 
 ```powershell
 cd C:\Users\maksi\projects\vizard-arctic
-.\.venv\Scripts\python.exe -m ml.train_mvp --subset-size 220 --epochs 6
+.\.venv\Scripts\python.exe -m ml.train_mvp
 ```
 
 Full training pass:
 
 ```powershell
-.\.venv\Scripts\python.exe -m ml.train_full --subset-size 409 --epochs 14
+.\.venv\Scripts\python.exe -m ml.train_full
 ```
 
 Smoke inference for one scene:
 
 ```powershell
-.\.venv\Scripts\python.exe -m ml.infer --scene-id <SCENE_ID>
+.\.venv\Scripts\python.exe -m ml.infer --scene-id <SCENE_ID> --tile-size 512 --tile-overlap 64
 ```
 
 Benchmark with masked-area metrics and optional YOLO comparison:
 
 ```powershell
-.\.venv\Scripts\python.exe -m ml.benchmark --checkpoint .\backend\checkpoints\mvp_unet.pt
+.\.venv\Scripts\python.exe -m ml.benchmark --checkpoint .\backend\checkpoints\mvp_unet.pt --synthetic-eval
 ```
 
 If you have previous YOLO predictions (`<scene_id>.npy/.npz/.png`):
@@ -96,3 +107,10 @@ If you have previous YOLO predictions (`<scene_id>.npy/.npz/.png`):
 ```powershell
 .\.venv\Scripts\python.exe -m ml.benchmark --checkpoint .\backend\checkpoints\mvp_unet.pt --yolo-pred-dir <YOLO_PRED_DIR>
 ```
+
+## Runtime model modes
+
+`POST /api/v1/reconstruction/jobs` supports:
+- `fast`: temporal fill baseline (no neural net)
+- `balanced`: tiled Temporal U-Net reconstruction with moderate overlap
+- `precise`: tiled Temporal U-Net reconstruction with larger overlap

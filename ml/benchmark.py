@@ -10,7 +10,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = ROOT / "backend"
@@ -20,7 +19,7 @@ if str(BACKEND_DIR) not in sys.path:
 from app.palette import IceClassPalette, load_palette
 from app.scene_index import SceneIndex
 from ml.metrics import evaluate_segmentation
-from ml.model import TemporalUNet
+from ml.predictor import TemporalUNetPredictor
 
 
 def _read_ice_rgb(path: Path) -> np.ndarray:
@@ -81,56 +80,24 @@ def _persistence_t1(
 
 class CkptInfer:
     def __init__(self, checkpoint: Path, history_steps: int, palette: IceClassPalette, crop_size: int):
-        ckpt = torch.load(checkpoint, map_location="cpu")
-        in_channels = int(ckpt.get("in_channels", history_steps + 4))
-        base_channels = int(ckpt.get("base_channels", 32))
-        self.model = TemporalUNet(in_channels=in_channels, num_classes=len(palette.class_ids), base_channels=base_channels)
-        self.model.load_state_dict(ckpt["model_state"])
-        self.model.eval()
-        self.palette = palette
-        self.history_steps = history_steps
-        self.crop_size = crop_size
-        self.max_class = max(1.0, float(np.max(palette.class_ids)))
+        self.predictor = TemporalUNetPredictor(
+            checkpoint=checkpoint,
+            palette=palette,
+            history_steps=history_steps,
+            tile_size=crop_size,
+            tile_overlap=max(16, crop_size // 8),
+            device="auto",
+        )
 
     def predict(
         self,
         *,
-        scene_id: str,
         month: int,
         observed: np.ndarray,
         gap: np.ndarray,
         history_cls: list[np.ndarray],
     ) -> tuple[np.ndarray, np.ndarray]:
-        h, w = observed.shape
-        cur = _resize_nn(observed, (self.crop_size, self.crop_size))
-        gap_s = _resize_nn(gap, (self.crop_size, self.crop_size))
-
-        hist_small: list[np.ndarray] = []
-        for hc in history_cls:
-            hist_small.append(_resize_nn(hc, (self.crop_size, self.crop_size)))
-        while len(hist_small) < self.history_steps:
-            hist_small.append(cur)
-
-        ang = 2.0 * np.pi * (float(month - 1) / 12.0)
-        ch = [cur.astype(np.float32) / self.max_class]
-        ch.extend([x.astype(np.float32) / self.max_class for x in hist_small[: self.history_steps]])
-        ch.append((gap_s == 0).astype(np.float32))
-        ch.append(np.full(cur.shape, np.sin(ang), dtype=np.float32))
-        ch.append(np.full(cur.shape, np.cos(ang), dtype=np.float32))
-        x = torch.from_numpy(np.stack(ch, axis=0)).unsqueeze(0)
-
-        with torch.no_grad():
-            logits, conf = self.model(x)
-            pred_idx = torch.argmax(logits, dim=1).squeeze(0).cpu().numpy().astype(np.int64)
-            conf_map = conf.squeeze(0).squeeze(0).cpu().numpy().astype(np.float32)
-
-        pred_ids = self.palette.class_ids[pred_idx].astype(np.uint8)
-        pred_up = cv2.resize(pred_ids, (w, h), interpolation=cv2.INTER_NEAREST)
-        conf_up = cv2.resize(conf_map.astype(np.float32), (w, h), interpolation=cv2.INTER_LINEAR)
-
-        out = observed.copy()
-        out[gap == 1] = pred_up[gap == 1]
-        return out, np.clip(conf_up, 0.0, 1.0)
+        return self.predictor.predict(month=month, observed=observed, gap=gap, history_cls=history_cls)
 
 
 def _load_yolo_pred(scene_id: str, yolo_dir: Path, shape_hw: tuple[int, int]) -> tuple[np.ndarray, np.ndarray] | None:
@@ -183,6 +150,124 @@ def _aggregate(rows: list[dict[str, float]]) -> dict[str, float]:
     return out
 
 
+def _parse_priority_ids(raw: str) -> list[int]:
+    out: list[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.append(int(part))
+        except ValueError:
+            continue
+    return out
+
+
+def _load_priority_polygons(path: Path, region_ids: set[int]) -> list[list[tuple[float, float]]]:
+    if not path.exists() or not region_ids:
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    polys: list[list[tuple[float, float]]] = []
+    for feat in data.get("features", []):
+        props = feat.get("properties", {})
+        region = int(props.get("region", -1))
+        if region not in region_ids:
+            continue
+        geom = feat.get("geometry", {})
+        if geom.get("type") != "Polygon":
+            continue
+        coords = geom.get("coordinates", [])
+        if not coords:
+            continue
+        ring = coords[0]
+        poly = []
+        for pt in ring:
+            if not isinstance(pt, list) or len(pt) < 2:
+                continue
+            poly.append((float(pt[0]), float(pt[1])))
+        if len(poly) >= 3:
+            polys.append(poly)
+    return polys
+
+
+def _priority_mask_from_geo(
+    polygons_lonlat: list[list[tuple[float, float]]],
+    bounds: list[float],
+    shape_hw: tuple[int, int],
+) -> np.ndarray:
+    h, w = shape_hw
+    if not polygons_lonlat:
+        return np.zeros((h, w), dtype=np.uint8)
+
+    lon_min, lat_min, lon_max, lat_max = bounds
+    dx = max(1e-12, lon_max - lon_min)
+    dy = max(1e-12, lat_max - lat_min)
+
+    mask = np.zeros((h, w), dtype=np.uint8)
+    for poly in polygons_lonlat:
+        pts: list[list[int]] = []
+        for lon, lat in poly:
+            x = int(round((lon - lon_min) / dx * (w - 1)))
+            y = int(round((lat_max - lat) / dy * (h - 1)))
+            x = max(0, min(w - 1, x))
+            y = max(0, min(h - 1, y))
+            pts.append([x, y])
+        if len(pts) >= 3:
+            cv2.fillPoly(mask, [np.array(pts, dtype=np.int32)], 1)
+    return mask
+
+
+def _sample_synthetic_gap(
+    *,
+    index: SceneIndex,
+    eval_ids: list[str],
+    current_sid: str,
+    shape_hw: tuple[int, int],
+    real_gap: np.ndarray,
+    rng: random.Random,
+) -> np.ndarray:
+    target_h, target_w = shape_hw
+    min_pixels = max(256, int(0.005 * target_h * target_w))
+    candidates = [sid for sid in eval_ids if sid != current_sid]
+    rng.shuffle(candidates)
+
+    for sid in candidates[:12]:
+        donor = index.read_gap_mask(sid)
+        donor = _resize_nn(donor, shape_hw)
+        syn = ((donor == 1) & (real_gap == 0)).astype(np.uint8)
+        if int(np.sum(syn)) >= min_pixels:
+            return syn
+
+    # deterministic fallback: shifted copy of current real gap, restricted to observed pixels
+    shift_y = max(1, target_h // 7)
+    shift_x = max(1, target_w // 9)
+    shifted = np.roll(real_gap, shift=(shift_y, shift_x), axis=(0, 1))
+    syn = ((shifted == 1) & (real_gap == 0)).astype(np.uint8)
+    if int(np.sum(syn)) >= min_pixels:
+        return syn
+    return np.zeros(shape_hw, dtype=np.uint8)
+
+
+def _per_class_from_cm(cm: np.ndarray, class_ids: np.ndarray) -> tuple[dict[str, float], dict[str, float]]:
+    f1: dict[str, float] = {}
+    iou: dict[str, float] = {}
+    for i, cid in enumerate(class_ids.tolist()):
+        tp = float(cm[i, i])
+        fp = float(np.sum(cm[:, i]) - tp)
+        fn = float(np.sum(cm[i, :]) - tp)
+        support = float(np.sum(cm[i, :]))
+        key = str(int(cid))
+        if support <= 0:
+            f1[key] = 0.0
+            iou[key] = 0.0
+            continue
+        prec = tp / max(1.0, tp + fp)
+        rec = tp / max(1.0, tp + fn)
+        f1[key] = float((2.0 * prec * rec) / max(1e-12, prec + rec))
+        iou[key] = float(tp / max(1.0, tp + fp + fn))
+    return f1, iou
+
+
 def _gap_bin(v: float) -> str:
     p = v * 100.0
     if p < 20:
@@ -208,6 +293,9 @@ def run_benchmark(
     output_json: Path,
     output_md: Path,
     yolo_summary_json: Path | None,
+    synthetic_eval: bool = True,
+    priority_polygons_path: Path | None = None,
+    priority_regions: str = "2,1,7,6,9,10,3",
 ) -> dict:
     rng = random.Random(seed)
     index = SceneIndex(ice_dir, comp_dir)
@@ -228,17 +316,36 @@ def run_benchmark(
     if checkpoint and checkpoint.exists():
         infer = CkptInfer(checkpoint=checkpoint, history_steps=history_steps, palette=palette, crop_size=crop_size)
 
-    method_rows: dict[str, list[dict[str, float]]] = defaultdict(list)
-    by_gap: dict[str, dict[str, list[dict[str, float]]]] = defaultdict(lambda: defaultdict(list))
-    by_month: dict[str, dict[str, list[dict[str, float]]]] = defaultdict(lambda: defaultdict(list))
+    context_rows: dict[str, dict[str, list[dict[str, float]]]] = defaultdict(lambda: defaultdict(list))
+    context_by_gap: dict[str, dict[str, dict[str, list[dict[str, float]]]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    context_by_month: dict[str, dict[str, dict[str, list[dict[str, float]]]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(list))
+    )
+    context_priority: dict[str, dict[str, list[dict[str, float]]]] = defaultdict(lambda: defaultdict(list))
+    context_cm: dict[str, dict[str, np.ndarray]] = defaultdict(dict)
+
+    priority_ids = _parse_priority_ids(priority_regions)
+    priority_polys = _load_priority_polygons(
+        priority_polygons_path if priority_polygons_path else (ROOT / "configs" / "corrected_output_polygons.geojson"),
+        set(priority_ids),
+    )
 
     for sid in eval_ids:
         rec = index.get(sid)
         cur_rgb = _read_ice_rgb(rec.iceclass_path)
         gt = palette.rgb_to_class_ids(cur_rgb)
-        gap = _resize_nn(index.read_gap_mask(sid), gt.shape)
-        observed = gt.copy()
-        observed[gap == 1] = palette.unknown_id
+        real_gap = _resize_nn(index.read_gap_mask(sid), gt.shape)
+        synthetic_gap = _sample_synthetic_gap(
+            index=index,
+            eval_ids=eval_ids,
+            current_sid=sid,
+            shape_hw=gt.shape,
+            real_gap=real_gap,
+            rng=rng,
+        )
+        gap_contexts = {"real_gap": real_gap}
+        if synthetic_eval and int(np.sum(synthetic_gap)) > 0:
+            gap_contexts["synthetic_gap"] = synthetic_gap
 
         hist = index.get_history(sid, history_steps)
         hist_cls: list[np.ndarray] = []
@@ -251,56 +358,113 @@ def run_benchmark(
             hist_gap.append(hgap)
         while len(hist_cls) < history_steps:
             hist_cls.append(gt)
-            hist_gap.append(gap)
+            hist_gap.append(real_gap)
 
-        preds: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-        preds["persistence_t1"] = _persistence_t1(observed, gap, hist_cls, hist_gap)
-        preds["temporal_fill"] = _temporal_fill(observed, gap, hist_cls, hist_gap)
-        if infer is not None:
-            preds["temporal_unet"] = infer.predict(
-                scene_id=sid,
-                month=rec.acquisition_start.month,
-                observed=observed,
-                gap=gap,
-                history_cls=hist_cls,
-            )
-        if yolo_pred_dir is not None:
-            yp = _load_yolo_pred(sid, yolo_pred_dir, gt.shape)
+        geo = index.get_geo_info(sid)
+        pr_mask_full = _priority_mask_from_geo(priority_polys, geo.bounds, gt.shape) if priority_polys else None
+
+        yp = _load_yolo_pred(sid, yolo_pred_dir, gt.shape) if yolo_pred_dir is not None else None
+
+        for ctx_name, gap in gap_contexts.items():
+            observed = gt.copy()
+            observed[gap == 1] = palette.unknown_id
+
+            preds: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+            preds["persistence_t1"] = _persistence_t1(observed, gap, hist_cls, hist_gap)
+            preds["temporal_fill"] = _temporal_fill(observed, gap, hist_cls, hist_gap)
+            if infer is not None:
+                preds["temporal_unet"] = infer.predict(
+                    month=rec.acquisition_start.month,
+                    observed=observed,
+                    gap=gap,
+                    history_cls=hist_cls,
+                )
             if yp is not None:
                 y_pred, y_conf = yp
                 out = observed.copy()
                 out[gap == 1] = y_pred[gap == 1]
                 preds["yolo_external"] = (out, y_conf)
 
-        gbin = _gap_bin(float(np.mean(gap)))
-        mbin = str(rec.acquisition_start.month)
-        for method, (pred, conf) in preds.items():
-            m = evaluate_segmentation(
-                y_true=gt,
-                y_pred=pred,
-                gap_mask=gap,
-                class_ids=palette.class_ids,
-                confidence=conf,
-            )
-            row = {
-                "masked_accuracy": m.masked_accuracy,
-                "masked_macro_f1": m.masked_macro_f1,
-                "masked_miou": m.masked_miou,
-                "masked_edge_f1": m.masked_edge_f1,
-                "confidence_brier": m.confidence_brier,
-                "confidence_ece": m.confidence_ece,
-                "recovered_ratio": m.recovered_ratio,
-            }
-            method_rows[method].append(row)
-            by_gap[method][gbin].append(row)
-            by_month[method][mbin].append(row)
+            gbin = _gap_bin(float(np.mean(gap)))
+            mbin = str(rec.acquisition_start.month)
+            for method, (pred, conf) in preds.items():
+                m = evaluate_segmentation(
+                    y_true=gt,
+                    y_pred=pred,
+                    gap_mask=gap,
+                    class_ids=palette.class_ids,
+                    confidence=conf,
+                    class_costs=palette.class_costs,
+                )
+                row = {
+                    "masked_accuracy": m.masked_accuracy,
+                    "masked_macro_f1": m.masked_macro_f1,
+                    "masked_miou": m.masked_miou,
+                    "masked_edge_f1": m.masked_edge_f1,
+                    "confidence_brier": m.confidence_brier,
+                    "confidence_ece": m.confidence_ece,
+                    "recovered_ratio": m.recovered_ratio,
+                    "business_cost_mae": m.business_cost_mae,
+                }
+                context_rows[ctx_name][method].append(row)
+                context_by_gap[ctx_name][method][gbin].append(row)
+                context_by_month[ctx_name][method][mbin].append(row)
 
-    methods = {k: {"count": len(v), "avg": _aggregate(v)} for k, v in method_rows.items()}
-    ranking = sorted(
-        [{"method": k, "masked_miou": v["avg"].get("masked_miou", 0.0)} for k, v in methods.items()],
-        key=lambda x: x["masked_miou"],
-        reverse=True,
-    )
+                cm = np.array(m.confusion_matrix, dtype=np.int64)
+                if method not in context_cm[ctx_name]:
+                    context_cm[ctx_name][method] = np.zeros_like(cm)
+                context_cm[ctx_name][method] += cm
+
+                if pr_mask_full is not None:
+                    pr_gap = ((pr_mask_full == 1) & (gap == 1)).astype(np.uint8)
+                    if int(np.sum(pr_gap)) > 0:
+                        mp = evaluate_segmentation(
+                            y_true=gt,
+                            y_pred=pred,
+                            gap_mask=pr_gap,
+                            class_ids=palette.class_ids,
+                            confidence=conf,
+                            class_costs=palette.class_costs,
+                        )
+                        context_priority[ctx_name][method].append(
+                            {
+                                "masked_accuracy": mp.masked_accuracy,
+                                "masked_macro_f1": mp.masked_macro_f1,
+                                "masked_miou": mp.masked_miou,
+                                "business_cost_mae": mp.business_cost_mae,
+                            }
+                        )
+
+    contexts: dict[str, dict] = {}
+    for ctx_name, methods_rows in context_rows.items():
+        methods_ctx = {}
+        for method, rows in methods_rows.items():
+            cm = context_cm.get(ctx_name, {}).get(method, np.zeros((len(palette.class_ids), len(palette.class_ids)), dtype=np.int64))
+            per_f1, per_iou = _per_class_from_cm(cm, palette.class_ids)
+            methods_ctx[method] = {
+                "count": len(rows),
+                "avg": _aggregate(rows),
+                "per_class_f1": per_f1,
+                "per_class_iou": per_iou,
+                "confusion_matrix": cm.tolist(),
+            }
+
+        ranking_ctx = sorted(
+            [{"method": k, "masked_miou": v["avg"].get("masked_miou", 0.0)} for k, v in methods_ctx.items()],
+            key=lambda x: x["masked_miou"],
+            reverse=True,
+        )
+        contexts[ctx_name] = {
+            "methods": methods_ctx,
+            "ranking_by_masked_miou": ranking_ctx,
+            "stratified_by_gap_bin": {m: {b: _aggregate(rows) for b, rows in bins.items()} for m, bins in context_by_gap[ctx_name].items()},
+            "stratified_by_month": {m: {mo: _aggregate(rows) for mo, rows in bins.items()} for m, bins in context_by_month[ctx_name].items()},
+            "priority_regions_avg": {m: _aggregate(rows) for m, rows in context_priority[ctx_name].items()},
+        }
+
+    primary_context = "synthetic_gap" if ("synthetic_gap" in contexts) else "real_gap"
+    methods = contexts.get(primary_context, {}).get("methods", {})
+    ranking = contexts.get(primary_context, {}).get("ranking_by_masked_miou", [])
 
     gates = {
         "model_vs_persistence_miou_delta": None,
@@ -331,17 +495,18 @@ def run_benchmark(
             "checkpoint": str(checkpoint) if checkpoint else None,
             "yolo_pred_dir": str(yolo_pred_dir) if yolo_pred_dir else None,
             "yolo_summary_json": str(yolo_summary_json) if yolo_summary_json else None,
+            "synthetic_eval": bool(synthetic_eval),
+            "priority_polygons_path": str(priority_polygons_path) if priority_polygons_path else None,
+            "priority_regions": priority_ids,
+            "primary_context": primary_context,
         },
+        "primary_context": primary_context,
         "methods": methods,
         "ranking_by_masked_miou": ranking,
-        "stratified_by_gap_bin": {
-            m: {b: _aggregate(rows) for b, rows in bins.items()}
-            for m, bins in by_gap.items()
-        },
-        "stratified_by_month": {
-            m: {mo: _aggregate(rows) for mo, rows in bins.items()}
-            for m, bins in by_month.items()
-        },
+        "stratified_by_gap_bin": contexts.get(primary_context, {}).get("stratified_by_gap_bin", {}),
+        "stratified_by_month": contexts.get(primary_context, {}).get("stratified_by_month", {}),
+        "priority_regions_avg": contexts.get(primary_context, {}).get("priority_regions_avg", {}),
+        "contexts": contexts,
         "gates": gates,
     }
 
@@ -354,6 +519,7 @@ def run_benchmark(
         "",
         f"- Generated (UTC): `{out['generated_at_utc']}`",
         f"- Evaluated scenes: `{len(eval_ids)}`",
+        f"- Primary context: `{primary_context}`",
         "",
         "## Ranking (masked mIoU)",
     ]
@@ -366,8 +532,13 @@ def run_benchmark(
             f"- model_vs_persistence_miou_delta: `{gates['model_vs_persistence_miou_delta']}`",
             f"- model_vs_yolo_status: `{gates['model_vs_yolo_status']}`",
             f"- model_vs_yolo_miou_delta: `{gates['model_vs_yolo_miou_delta']}`",
+            "",
+            "## Priority Regions",
+            f"- Regions used: `{priority_ids}`",
         ]
     )
+    for method, vals in contexts.get(primary_context, {}).get("priority_regions_avg", {}).items():
+        md.append(f"- `{method}` priority masked_miou: `{vals.get('masked_miou', 0.0):.4f}`")
     output_md.write_text("\n".join(md), encoding="utf-8")
 
     return out
@@ -385,6 +556,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-scenes", type=int, default=180)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--crop-size", type=int, default=512)
+    parser.add_argument("--synthetic-eval", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--priority-polygons", type=Path, default=ROOT / "configs" / "corrected_output_polygons.geojson")
+    parser.add_argument("--priority-regions", type=str, default="2,1,7,6,9,10,3")
     parser.add_argument("--output-json", type=Path, default=ROOT / "storage" / "reports" / "benchmark.json")
     parser.add_argument("--output-md", type=Path, default=ROOT / "storage" / "reports" / "benchmark.md")
     return parser.parse_args()
@@ -405,6 +579,9 @@ def main() -> None:
         output_json=args.output_json,
         output_md=args.output_md,
         yolo_summary_json=args.yolo_summary_json if args.yolo_summary_json and args.yolo_summary_json.exists() else None,
+        synthetic_eval=bool(args.synthetic_eval),
+        priority_polygons_path=args.priority_polygons if args.priority_polygons and args.priority_polygons.exists() else None,
+        priority_regions=args.priority_regions,
     )
     top = out["ranking_by_masked_miou"][0] if out["ranking_by_masked_miou"] else None
     if top:

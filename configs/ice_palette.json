@@ -1,47 +1,60 @@
 {
-  "description": "Default IceClass RGB palette and routing costs for Vizard Arctic MVP.",
+  "description": "Official IceClass palette (8 classes) with routing-oriented costs for Vizard Arctic.",
+  "nearest_tolerance": 0,
   "classes": [
     {
       "id": 0,
-      "name": "open_water_or_low_ice",
-      "rgb": [0, 250, 0],
-      "cost": 1.0
+      "name": "no_class",
+      "rgb": [1, 1, 1],
+      "cost": 12.0
     },
     {
       "id": 1,
-      "name": "thin_first_year_ice",
-      "rgb": [255, 243, 171],
-      "cost": 2.2
+      "name": "open_water",
+      "rgb": [0, 100, 255],
+      "cost": 1.0
     },
     {
       "id": 2,
-      "name": "medium_first_year_ice",
-      "rgb": [200, 200, 0],
-      "cost": 3.1
+      "name": "nilas",
+      "rgb": [0, 34, 223],
+      "cost": 1.8
     },
     {
       "id": 3,
-      "name": "thick_first_year_ice",
-      "rgb": [150, 150, 150],
-      "cost": 4.4
+      "name": "young_ice",
+      "rgb": [250, 0, 255],
+      "cost": 2.6
     },
     {
       "id": 4,
-      "name": "old_or_compact_ice",
-      "rgb": [255, 0, 250],
-      "cost": 6.5
+      "name": "thin_first_year_ice",
+      "rgb": [0, 250, 0],
+      "cost": 3.4
     },
     {
       "id": 5,
-      "name": "land_or_artifact",
-      "rgb": [1, 1, 1],
-      "cost": 9999.0
+      "name": "medium_or_thick_first_year_ice",
+      "rgb": [0, 200, 200],
+      "cost": 4.8
+    },
+    {
+      "id": 6,
+      "name": "level_first_year_ice",
+      "rgb": [150, 150, 150],
+      "cost": 5.8
+    },
+    {
+      "id": 7,
+      "name": "melting_first_year_ice",
+      "rgb": [171, 243, 255],
+      "cost": 3.9
     }
   ],
   "unknown_class": {
     "id": 255,
     "name": "unknown",
     "rgb": [0, 0, 0],
-    "cost": 8.0
+    "cost": 10.0
   }
 }

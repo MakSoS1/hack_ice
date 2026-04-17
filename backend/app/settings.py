@@ -21,6 +21,7 @@ class Settings:
     model_checkpoint_path: Path
     model_device: str
     model_input_size: int
+    model_tile_overlap: int
     preview_max_width: int
     route_grid_size: int
     cors_origins: list[str]
@@ -52,6 +53,7 @@ def get_settings() -> Settings:
         model_checkpoint_path=checkpoint,
         model_device=os.getenv("VIZARD_MODEL_DEVICE", "cuda"),
         model_input_size=int(os.getenv("VIZARD_MODEL_INPUT_SIZE", "512")),
+        model_tile_overlap=int(os.getenv("VIZARD_MODEL_TILE_OVERLAP", "64")),
         preview_max_width=int(os.getenv("VIZARD_PREVIEW_MAX_WIDTH", "2048")),
         route_grid_size=int(os.getenv("VIZARD_ROUTE_GRID_SIZE", "512")),
         cors_origins=cors_origins,

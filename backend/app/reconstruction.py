@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,10 +9,22 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
+
 from .palette import IceClassPalette
 from .route_solver import downsample_grid, haversine_km
 from .scene_index import SceneIndex
 from .utils import utcnow
+
+try:
+    from ml.predictor import TemporalUNetPredictor
+except Exception:  # noqa: BLE001
+    TemporalUNetPredictor = None
+
+
+_PREDICTOR_CACHE: dict[str, TemporalUNetPredictor] = {}
 
 
 @dataclass
@@ -83,6 +96,42 @@ def _fill_from_history(
     return recon, conf
 
 
+def _predict_with_model(
+    *,
+    checkpoint: Path,
+    palette: IceClassPalette,
+    month: int,
+    observed_classes: np.ndarray,
+    gap_mask: np.ndarray,
+    history_classes: list[np.ndarray],
+    tile_size: int,
+    tile_overlap: int,
+    device: str,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    if TemporalUNetPredictor is None:
+        return None
+    if not checkpoint.exists():
+        return None
+
+    key = f"{checkpoint.resolve()}::{tile_size}::{tile_overlap}::{device}"
+    predictor = _PREDICTOR_CACHE.get(key)
+    if predictor is None:
+        predictor = TemporalUNetPredictor(
+            checkpoint=checkpoint,
+            palette=palette,
+            tile_size=tile_size,
+            tile_overlap=tile_overlap,
+            device=device if device else "auto",
+        )
+        _PREDICTOR_CACHE[key] = predictor
+    return predictor.predict(
+        month=month,
+        observed=observed_classes,
+        gap=gap_mask,
+        history_cls=history_classes,
+    )
+
+
 def _prepare_preview(arr: np.ndarray, max_width: int, interpolation: int) -> np.ndarray:
     h, w = arr.shape[:2]
     if w <= max_width:
@@ -122,9 +171,11 @@ def run_reconstruction(
     model_mode: str,
     preview_max_width: int,
     route_grid_size: int,
+    model_checkpoint_path: Path,
+    model_device: str,
+    model_input_size: int,
+    model_tile_overlap: int,
 ) -> ReconstructionArtifacts:
-    _ = model_mode  # placeholder for future model-switch logic
-
     rec = scene_index.get(scene_id)
     geo = scene_index.get_geo_info(scene_id)
 
@@ -148,12 +199,37 @@ def run_reconstruction(
         hist_classes.append(h_cls_resized)
         hist_gaps.append(h_gap_resized)
 
-    reconstructed_classes, confidence = _fill_from_history(
-        observed_classes=observed_classes,
-        gap_mask=gap_mask,
-        history_classes=hist_classes,
-        history_gap_masks=hist_gaps,
-    )
+    model_mode = str(model_mode).lower().strip()
+    effective_mode = model_mode if model_mode in {"fast", "balanced", "precise"} else "balanced"
+    if effective_mode == "fast":
+        reconstructed_classes, confidence = _fill_from_history(
+            observed_classes=observed_classes,
+            gap_mask=gap_mask,
+            history_classes=hist_classes,
+            history_gap_masks=hist_gaps,
+        )
+    else:
+        model_out = _predict_with_model(
+            checkpoint=model_checkpoint_path,
+            palette=palette,
+            month=rec.acquisition_start.month,
+            observed_classes=observed_classes,
+            gap_mask=gap_mask,
+            history_classes=hist_classes,
+            tile_size=model_input_size,
+            tile_overlap=model_tile_overlap if effective_mode == "precise" else max(16, model_tile_overlap // 2),
+            device=model_device,
+        )
+        if model_out is None:
+            reconstructed_classes, confidence = _fill_from_history(
+                observed_classes=observed_classes,
+                gap_mask=gap_mask,
+                history_classes=hist_classes,
+                history_gap_masks=hist_gaps,
+            )
+            effective_mode = "fast_fallback"
+        else:
+            reconstructed_classes, confidence = model_out
 
     difference = np.zeros_like(observed_classes, dtype=np.uint8)
     changed = (gap_mask == 1) & (reconstructed_classes != observed_classes)
@@ -228,6 +304,8 @@ def run_reconstruction(
     summary = {
         "layer_id": layer_id,
         "scene_id": scene_id,
+        "model_mode_requested": model_mode,
+        "model_mode_effective": effective_mode,
         "coverage_before": coverage_before,
         "coverage_after": coverage_after,
         "restored_area_km2": restored_area_km2,

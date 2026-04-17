@@ -27,6 +27,10 @@ cd C:\Users\maksi\projects\vizard-arctic
 powershell -ExecutionPolicy Bypass -File .\scripts\setup_remote.ps1
 ```
 
+## Frontend status
+
+`frontend/` now contains the full `vizard-arctic-clean` interface and is the primary UI for this repository.
+
 ### Run backend
 
 ```powershell
@@ -114,3 +118,35 @@ If you have previous YOLO predictions (`<scene_id>.npy/.npz/.png`):
 - `fast`: temporal fill baseline (no neural net)
 - `balanced`: tiled Temporal U-Net reconstruction with moderate overlap
 - `precise`: tiled Temporal U-Net reconstruction with larger overlap
+
+## Why CPU/GPU can stay under 20%
+
+Main bottleneck is input pipeline:
+- each training sample reads large GeoTIFF rasters from disk (`IceClass` + `Composite`);
+- `Composite` gap masks are expensive to decode repeatedly;
+- with small batch/crop the GPU compute step is short, so it waits for data.
+
+Mitigations included in this repo:
+- LRU cache for class/gap maps in `SceneTemporalDataset` (`--cache-items`, default `24`);
+- tiled inference and low-VRAM defaults (`batch_size=1`, `grad_accum`, `group` norm);
+- CLI controls for `--workers` and `--cache-items`.
+
+Example:
+
+```powershell
+.\.venv\Scripts\python.exe -m ml.train_mvp --workers 2 --cache-items 48
+```
+
+## Demo scenario (ice motion + model impact)
+
+Run:
+
+```powershell
+cd C:\Users\maksi\projects\vizard-arctic
+.\.venv\Scripts\python.exe .\scripts\demo_scenario.py --model-mode balanced
+```
+
+Outputs:
+- `storage/reports/demo_scenario.json`
+- `storage/reports/demo_scenario.md`
+- `storage/reports/demo_ice_motion_*.gif`

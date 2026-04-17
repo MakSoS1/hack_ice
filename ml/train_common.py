@@ -47,6 +47,7 @@ class TrainConfig:
     grad_accum: int
     synthetic_gap_prob: float
     norm: str
+    cache_items: int
 
 
 def parse_common_args(default_subset: int, default_epochs: int) -> TrainConfig:
@@ -71,6 +72,7 @@ def parse_common_args(default_subset: int, default_epochs: int) -> TrainConfig:
     parser.add_argument("--grad-accum", type=int, default=4)
     parser.add_argument("--synthetic-gap-prob", type=float, default=0.65)
     parser.add_argument("--norm", type=str, choices=["batch", "group"], default="group")
+    parser.add_argument("--cache-items", type=int, default=24)
     args = parser.parse_args()
 
     return TrainConfig(
@@ -94,6 +96,7 @@ def parse_common_args(default_subset: int, default_epochs: int) -> TrainConfig:
         grad_accum=max(1, int(args.grad_accum)),
         synthetic_gap_prob=float(np.clip(args.synthetic_gap_prob, 0.0, 1.0)),
         norm=str(args.norm),
+        cache_items=max(0, int(args.cache_items)),
     )
 
 
@@ -295,6 +298,7 @@ def train_model(cfg: TrainConfig) -> None:
         augment=True,
         seed=cfg.seed,
         synthetic_gap_prob=cfg.synthetic_gap_prob,
+        cache_items=cfg.cache_items,
     )
     val_ds = SceneTemporalDataset(
         scene_index=scene_index,
@@ -307,6 +311,7 @@ def train_model(cfg: TrainConfig) -> None:
         augment=False,
         seed=cfg.seed + 7,
         synthetic_gap_prob=1.0,
+        cache_items=cfg.cache_items,
     )
 
     train_loader = DataLoader(
@@ -422,6 +427,7 @@ def train_model(cfg: TrainConfig) -> None:
                         "seed": cfg.seed,
                         "grad_accum": cfg.grad_accum,
                         "synthetic_gap_prob": cfg.synthetic_gap_prob,
+                        "cache_items": cfg.cache_items,
                     },
                 },
                 cfg.output_checkpoint,
@@ -446,6 +452,7 @@ def train_model(cfg: TrainConfig) -> None:
                         "grad_accum": cfg.grad_accum,
                         "synthetic_gap_prob": cfg.synthetic_gap_prob,
                         "norm": cfg.norm,
+                        "cache_items": cfg.cache_items,
                     },
                     "train_size": len(train_ids),
                     "val_size": len(val_ids),

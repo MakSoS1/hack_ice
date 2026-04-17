@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from collections import OrderedDict
 
 import cv2
 import numpy as np
@@ -34,6 +35,7 @@ class SceneTemporalDataset(Dataset[SceneSample]):
         augment: bool = False,
         seed: int = 42,
         synthetic_gap_prob: float = 0.0,
+        cache_items: int = 24,
     ):
         self.scene_index = scene_index
         self.palette = palette
@@ -44,12 +46,15 @@ class SceneTemporalDataset(Dataset[SceneSample]):
         self.gap_focus_prob = float(np.clip(gap_focus_prob, 0.0, 1.0))
         self.augment = augment
         self.synthetic_gap_prob = float(np.clip(synthetic_gap_prob, 0.0, 1.0))
+        self.cache_items = max(0, int(cache_items))
 
         self.max_class = max(1.0, float(np.max(self.palette.class_ids)))
         self.rng = random.Random(seed)
         self.id_to_index_lut = np.full(256, 0, dtype=np.uint8)
         for i, cid in enumerate(self.palette.class_ids.tolist()):
             self.id_to_index_lut[int(cid)] = int(i)
+        self._class_cache: OrderedDict[str, np.ndarray] = OrderedDict()
+        self._gap_cache: OrderedDict[str, np.ndarray] = OrderedDict()
 
     def __len__(self) -> int:
         return len(self.scene_ids)
@@ -58,9 +63,8 @@ class SceneTemporalDataset(Dataset[SceneSample]):
         scene_id = self.scene_ids[idx]
         rec = self.scene_index.get(scene_id)
 
-        cur_rgb = self._read_ice(rec.iceclass_path)
-        cur_cls = self.palette.rgb_to_class_ids(cur_rgb)
-        cur_gap = self._resize(self.scene_index.read_gap_mask(scene_id), cur_cls.shape)
+        cur_cls = self._get_scene_class(scene_id, rec.iceclass_path)
+        cur_gap = self._get_scene_gap(scene_id, cur_cls.shape)
         eff_gap = cur_gap
         if self.synthetic_gap_prob > 0.0 and self.rng.random() < self.synthetic_gap_prob:
             syn_gap = self._sample_synthetic_gap(cur_shape=cur_cls.shape, base_gap=cur_gap, scene_id=scene_id)
@@ -71,10 +75,9 @@ class SceneTemporalDataset(Dataset[SceneSample]):
         history_gap: list[np.ndarray] = []
         history = self.scene_index.get_history(scene_id, self.history_steps)
         for hrec in history:
-            hrgb = self._read_ice(hrec.iceclass_path)
-            hcls = self.palette.rgb_to_class_ids(hrgb)
+            hcls = self._get_scene_class(hrec.scene_id, hrec.iceclass_path)
             hcls = self._resize(hcls, cur_cls.shape)
-            hgap = self._resize(self.scene_index.read_gap_mask(hrec.scene_id), cur_cls.shape)
+            hgap = self._resize(self._get_scene_gap(hrec.scene_id, hcls.shape), cur_cls.shape)
             history_cls.append(hcls)
             history_gap.append(hgap)
 
@@ -265,7 +268,8 @@ class SceneTemporalDataset(Dataset[SceneSample]):
             donor_id = self.scene_ids[self.rng.randrange(len(self.scene_ids))]
             if donor_id == scene_id:
                 continue
-            donor_gap = self._resize(self.scene_index.read_gap_mask(donor_id), cur_shape)
+            donor_rec = self.scene_index.get(donor_id)
+            donor_gap = self._resize(self._get_scene_gap(donor_id, self._get_scene_class(donor_id, donor_rec.iceclass_path).shape), cur_shape)
             syn = ((donor_gap == 1) & (base_gap == 0)).astype(np.uint8)
             if int(np.sum(syn)) >= min_pixels:
                 return syn
@@ -278,6 +282,40 @@ class SceneTemporalDataset(Dataset[SceneSample]):
         if int(np.sum(syn)) >= min_pixels:
             return syn
         return np.zeros(cur_shape, dtype=np.uint8)
+
+    def _get_scene_class(self, scene_id: str, ice_path) -> np.ndarray:
+        cached = self._cache_get(self._class_cache, scene_id)
+        if cached is not None:
+            return cached
+        rgb = self._read_ice(ice_path)
+        cls = self.palette.rgb_to_class_ids(rgb)
+        self._cache_put(self._class_cache, scene_id, cls)
+        return cls
+
+    def _get_scene_gap(self, scene_id: str, shape_hw: tuple[int, int]) -> np.ndarray:
+        cached = self._cache_get(self._gap_cache, scene_id)
+        if cached is not None:
+            return cached
+        gap = self.scene_index.read_gap_mask(scene_id)
+        gap = self._resize(gap, shape_hw)
+        self._cache_put(self._gap_cache, scene_id, gap)
+        return gap
+
+    def _cache_get(self, store: OrderedDict[str, np.ndarray], key: str) -> np.ndarray | None:
+        if self.cache_items <= 0:
+            return None
+        value = store.get(key)
+        if value is not None:
+            store.move_to_end(key)
+        return value
+
+    def _cache_put(self, store: OrderedDict[str, np.ndarray], key: str, value: np.ndarray) -> None:
+        if self.cache_items <= 0:
+            return
+        store[key] = value
+        store.move_to_end(key)
+        while len(store) > self.cache_items:
+            store.popitem(last=False)
 
 
 def collate_scene_samples(samples: list[SceneSample]) -> SceneSample:

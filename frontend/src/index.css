@@ -1,0 +1,155 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* VIZARD chrome */
+    --background: 214 25% 97%;
+    --foreground: 213 67% 16%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 213 67% 16%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 213 67% 16%;
+
+    /* Brand navy */
+    --primary: 213 67% 16%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Accent blue */
+    --accent-blue: 212 70% 39%;
+    --accent-blue-foreground: 0 0% 100%;
+
+    --secondary: 214 28% 93%;
+    --secondary-foreground: 213 67% 16%;
+
+    --muted: 214 25% 95%;
+    --muted-foreground: 213 15% 42%;
+
+    --accent: 214 28% 93%;
+    --accent-foreground: 213 67% 16%;
+
+    --destructive: 9 71% 41%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Status palette */
+    --status-current: 144 51% 37%;     /* зелёный — Актуально */
+    --status-forecast: 32 64% 48%;     /* янтарный — Прогноз */
+    --status-ai: 261 39% 51%;          /* фиолетовый — AI */
+    --status-nodata: 213 13% 53%;      /* серый — Нет данных */
+    --status-error: 9 71% 41%;         /* красный — Ошибка */
+
+    --border: 214 22% 88%;
+    --input: 214 22% 88%;
+    --ring: 212 70% 39%;
+
+    --radius: 0.5rem;
+
+    /* Map / chrome surfaces */
+    --chrome: 214 25% 97%;
+    --chrome-border: 214 22% 88%;
+    --map-water: 207 45% 88%;
+    --map-water-deep: 209 50% 78%;
+    --map-land: 40 18% 84%;
+    --map-ice-low: 200 60% 92%;
+    --map-ice-mid: 205 55% 78%;
+    --map-ice-high: 210 50% 62%;
+    --map-graticule: 213 25% 70%;
+
+    --shadow-panel: 0 1px 2px 0 hsl(213 30% 20% / 0.04), 0 2px 8px -2px hsl(213 30% 20% / 0.06);
+    --shadow-elevated: 0 2px 4px 0 hsl(213 30% 20% / 0.06), 0 8px 24px -6px hsl(213 30% 20% / 0.10);
+
+    --sidebar-background: 214 25% 97%;
+    --sidebar-foreground: 213 67% 16%;
+    --sidebar-primary: 213 67% 16%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 214 28% 93%;
+    --sidebar-accent-foreground: 213 67% 16%;
+    --sidebar-border: 214 22% 88%;
+    --sidebar-ring: 212 70% 39%;
+  }
+
+  .dark {
+    --background: 213 40% 10%;
+    --foreground: 214 25% 95%;
+    --card: 213 35% 13%;
+    --card-foreground: 214 25% 95%;
+    --popover: 213 35% 13%;
+    --popover-foreground: 214 25% 95%;
+    --primary: 214 25% 95%;
+    --primary-foreground: 213 67% 16%;
+    --secondary: 213 30% 18%;
+    --secondary-foreground: 214 25% 95%;
+    --muted: 213 30% 18%;
+    --muted-foreground: 213 15% 65%;
+    --accent: 213 30% 18%;
+    --accent-foreground: 214 25% 95%;
+    --destructive: 9 71% 41%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 213 30% 22%;
+    --input: 213 30% 22%;
+    --ring: 212 70% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html, body, #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+
+  .font-mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  @supports (padding: env(safe-area-inset-bottom)) {
+    .pb-safe {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .pt-safe {
+      padding-top: env(safe-area-inset-top);
+    }
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-card border border-border rounded-lg;
+    box-shadow: var(--shadow-panel);
+  }
+
+  .panel-elevated {
+    @apply bg-card border border-border rounded-lg;
+    box-shadow: var(--shadow-elevated);
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium border;
+  }
+
+  .hatched-ai {
+    background-image: repeating-linear-gradient(
+      45deg,
+      hsl(var(--status-ai) / 0.35),
+      hsl(var(--status-ai) / 0.35) 3px,
+      hsl(var(--status-ai) / 0.12) 3px,
+      hsl(var(--status-ai) / 0.12) 7px
+    );
+  }
+}

@@ -17,9 +17,11 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from app.palette import load_palette
+from app.db import MetadataDB
 from app.reconstruction import run_reconstruction
 from app.route_solver import solve_astar
 from app.scene_index import SceneIndex
+from app.utils import params_hash
 
 
 def _scene_triplet(index: SceneIndex, start_scene_id: str | None) -> list[str]:
@@ -102,6 +104,7 @@ def run_demo(
 ) -> dict:
     index = SceneIndex(ice_dir, comp_dir)
     palette = load_palette(palette_path)
+    db = MetadataDB(storage_dir / "metadata.db")
 
     scene_ids = _scene_triplet(index, start_scene_id=start_scene_id)
     layers: list[dict] = []
@@ -123,6 +126,15 @@ def run_demo(
             model_tile_overlap=64,
         )
         route = _solve_route_for_layer(artifacts.layer_dir, palette=palette)
+        phash = params_hash(sid, history_steps=1, model_mode=model_mode, aoi_bbox=None)
+        db.upsert_layer(
+            layer_id=artifacts.layer_id,
+            scene_id=sid,
+            params_hash=phash,
+            path=str(artifacts.layer_dir),
+            bounds=artifacts.bounds,
+            summary=artifacts.summary,
+        )
         layers.append(
             {
                 "scene_id": sid,

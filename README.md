@@ -172,6 +172,7 @@ Outputs:
 - `storage/reports/demo_scenario.json`
 - `storage/reports/demo_scenario.md`
 - `storage/reports/demo_ice_motion_*.gif`
+- demo layers are auto-registered in `storage/metadata.db` for UI reuse
 
 UI demo shortcut:
 - in AI panel click `Загрузить готовый демо-слой` to open latest precomputed layer without waiting for a full run.

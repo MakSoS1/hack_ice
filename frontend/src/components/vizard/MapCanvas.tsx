@@ -747,6 +747,13 @@ export function MapCanvas() {
   };
 
   const handleToggleCameraMode = () => {
+    if (rendererMode === "leaflet") {
+      hasFittedRef.current = false;
+      setCameraMode("3d");
+      setMapError("Пробуем снова включить 3D/WebGL...");
+      setRendererMode("maplibre");
+      return;
+    }
     setCameraMode((prev) => (prev === "3d" ? "2d" : "3d"));
   };
 
@@ -806,16 +813,22 @@ export function MapCanvas() {
               <TooltipTrigger asChild>
                 <button
                   className={cn("h-8 w-8 flex items-center justify-center text-foreground hover:bg-muted/80 transition-colors border-t border-border/30")}
-                  aria-label={cameraMode === "3d" ? "Переключить в 2D" : "Переключить в 3D"}
+                  aria-label={
+                    rendererMode === "leaflet"
+                      ? "Попробовать включить 3D/WebGL"
+                      : cameraMode === "3d"
+                        ? "Переключить в 2D"
+                        : "Переключить в 3D"
+                  }
                   onClick={handleToggleCameraMode}
-                  title={rendererMode === "leaflet" ? "3D доступно в режиме WebGL" : undefined}
+                  title={rendererMode === "leaflet" ? "Попробовать снова включить 3D/WebGL" : undefined}
                 >
-                  <span className="text-[10px] font-semibold tracking-wide">{cameraMode === "3d" ? "3D" : "2D"}</span>
+                  <span className="text-[10px] font-semibold tracking-wide">{rendererMode === "leaflet" ? "3D" : cameraMode === "3d" ? "3D" : "2D"}</span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="left">
                 {rendererMode === "leaflet"
-                  ? "3D доступно в режиме WebGL"
+                  ? "Попробовать снова включить 3D/WebGL"
                   : cameraMode === "3d"
                     ? "Переключить в 2D"
                     : "Переключить в 3D"}

@@ -66,6 +66,8 @@ class LayerManifestResponse(BaseModel):
 
 
 class LayerSummaryResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     layer_id: str
     scene_id: str
     model_mode_requested: str | None = None

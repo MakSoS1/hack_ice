@@ -4,6 +4,7 @@ import {
   getLayerManifest,
   getLayerSummary,
   getReconstructionJob,
+  listRecentLayers,
   listScenes,
   solveRoute,
 } from "@/lib/api-client";
@@ -61,6 +62,15 @@ export function useLayerSummaryQuery(layerId: string | null) {
     },
     enabled: Boolean(layerId),
     staleTime: 10_000,
+  });
+}
+
+export function useRecentLayersQuery(limit = 20, enabled = true) {
+  return useQuery({
+    queryKey: ["recent-layers", limit],
+    queryFn: () => listRecentLayers(limit, 0),
+    enabled,
+    staleTime: 8_000,
   });
 }
 

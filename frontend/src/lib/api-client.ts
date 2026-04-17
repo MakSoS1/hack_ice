@@ -1,4 +1,5 @@
 import {
+  LayerListResponse,
   LayerManifestResponse,
   LayerSummaryResponse,
   ReconstructionJobCreate,
@@ -57,6 +58,10 @@ export async function getLayerManifest(layerId: string): Promise<LayerManifestRe
 
 export async function getLayerSummary(layerId: string): Promise<LayerSummaryResponse> {
   return requestJson<LayerSummaryResponse>(`${API_PREFIX}/layers/${layerId}/summary`);
+}
+
+export async function listRecentLayers(limit = 20, offset = 0): Promise<LayerListResponse> {
+  return requestJson<LayerListResponse>(`${API_PREFIX}/layers/recent?limit=${limit}&offset=${offset}`);
 }
 
 export async function solveRoute(payload: RouteSolveRequest): Promise<RouteSolveResponse> {

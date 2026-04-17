@@ -59,6 +59,8 @@ export interface LayerManifestResponse {
 export interface LayerSummaryResponse {
   layer_id: string;
   scene_id: string;
+  model_mode_requested?: string | null;
+  model_mode_effective?: string | null;
   coverage_before: number;
   coverage_after: number;
   restored_area_km2: number;
@@ -66,6 +68,18 @@ export interface LayerSummaryResponse {
   high_confidence_ratio: number;
   low_confidence_ratio: number;
   changed_pixels_ratio: number;
+}
+
+export interface LayerListItem {
+  layer_id: string;
+  scene_id: string;
+  created_at: string;
+  summary: Record<string, unknown>;
+}
+
+export interface LayerListResponse {
+  total: number;
+  layers: LayerListItem[];
 }
 
 export interface RouteSolveRequest {

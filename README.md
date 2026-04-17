@@ -5,7 +5,7 @@ End-to-end prototype for Arctic ice gap filling and route planning.
 ## Monorepo structure
 
 - `backend/` FastAPI + job queue + scene index + layer publishing + A* routes
-- `frontend/` React + MapLibre UI (integrated from `arctic-vista-main`)
+- `frontend/` React + MapLibre UI (full `vizard-arctic-clean` interface)
 - `ml/` temporal U-Net training/inference scripts
 - `configs/` palette and model configs
 - `storage/` runtime artifacts (`layers/`, `metadata.db`)
@@ -51,11 +51,33 @@ Set API URL for frontend with:
 setx VITE_API_BASE_URL http://127.0.0.1:8000
 ```
 
+### Run frontend on macOS, backend+model on remote PC
+
+On remote Windows PC:
+
+```powershell
+cd C:\Users\maksi\projects\vizard-arctic\backend
+..\.venv\Scripts\python.exe run.py
+```
+
+On local macOS:
+
+```bash
+cd /Users/maksos/Documents/work/hack_ice/_repo_hack_ice/frontend
+cp .env.remote.example .env.local
+npm install
+npm run dev -- --host 0.0.0.0 --port 8080
+```
+
+Then open `http://localhost:8080`.
+
 ## API contract
 
+- `GET /` (service info)
 - `GET /api/v1/scenes`
 - `POST /api/v1/reconstruction/jobs`
 - `GET /api/v1/reconstruction/jobs/{job_id}`
+- `GET /api/v1/layers/recent`
 - `GET /api/v1/layers/{layer_id}/manifest`
 - `GET /api/v1/layers/{layer_id}/{view}.png`
 - `GET /api/v1/layers/{layer_id}/summary`
@@ -150,3 +172,6 @@ Outputs:
 - `storage/reports/demo_scenario.json`
 - `storage/reports/demo_scenario.md`
 - `storage/reports/demo_ice_motion_*.gif`
+
+UI demo shortcut:
+- in AI panel click `Загрузить готовый демо-слой` to open latest precomputed layer without waiting for a full run.

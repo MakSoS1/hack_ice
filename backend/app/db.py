@@ -176,3 +176,31 @@ class MetadataDB:
             "summary": from_json(row["summary_json"]),
             "created_at": datetime.fromisoformat(row["created_at"]),
         }
+
+    def list_recent_layers(self, *, limit: int = 20, offset: int = 0) -> tuple[int, list[dict[str, Any]]]:
+        with self._connect() as conn:
+            total_row = conn.execute("SELECT COUNT(*) AS c FROM layers").fetchone()
+            total = int(total_row["c"]) if total_row is not None else 0
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM layers
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (int(limit), int(offset)),
+            ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            items.append(
+                {
+                    "id": row["id"],
+                    "scene_id": row["scene_id"],
+                    "params_hash": row["params_hash"],
+                    "path": row["path"],
+                    "bounds": from_json(row["bounds_json"]).get("bounds", []),
+                    "summary": from_json(row["summary_json"]),
+                    "created_at": datetime.fromisoformat(row["created_at"]),
+                }
+            )
+        return total, items

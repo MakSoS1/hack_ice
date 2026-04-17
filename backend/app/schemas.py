@@ -65,6 +65,18 @@ class LayerManifestResponse(BaseModel):
     views: list[LayerViewManifest]
 
 
+class LayerListItem(BaseModel):
+    layer_id: str
+    scene_id: str
+    created_at: datetime
+    summary: dict
+
+
+class LayerListResponse(BaseModel):
+    total: int
+    layers: list[LayerListItem]
+
+
 class LayerSummaryResponse(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 

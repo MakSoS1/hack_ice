@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from .db import MetadataDB
 from .jobs import JobManager
@@ -15,6 +15,8 @@ from .palette import IceClassPalette, load_palette
 from .route_solver import GridRoute, cell_to_lonlat, solve_astar
 from .scene_index import SceneIndex
 from .schemas import (
+    LayerListItem,
+    LayerListResponse,
     LayerManifestResponse,
     LayerSummaryResponse,
     LayerViewManifest,
@@ -121,6 +123,19 @@ def create_app() -> FastAPI:
                 detail="Dataset directories are unavailable. Check VIZARD_ICECLASS_DIR and VIZARD_COMPOSITE_DIR.",
             )
         return st
+
+    @app.get("/")
+    def root() -> dict[str, str]:
+        return {
+            "service": "Vizard Arctic API",
+            "status": "ok",
+            "health": "/health",
+            "api_prefix": settings.api_prefix,
+        }
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> Response:
+        return Response(status_code=204)
 
     @app.get("/health")
     def health() -> dict[str, str | int]:
@@ -237,6 +252,24 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Unknown layer_id={layer_id}")
         s = rec["summary"]
         return LayerSummaryResponse(**s)
+
+    @app.get(f"{settings.api_prefix}/layers/recent", response_model=LayerListResponse)
+    def list_recent_layers(
+        limit: int = Query(default=20, ge=1, le=200),
+        offset: int = Query(default=0, ge=0),
+    ) -> LayerListResponse:
+        st: AppState = app.state.vizard
+        total, layers = st.db.list_recent_layers(limit=limit, offset=offset)
+        out = [
+            LayerListItem(
+                layer_id=row["id"],
+                scene_id=row["scene_id"],
+                created_at=row["created_at"],
+                summary=row["summary"],
+            )
+            for row in layers
+        ]
+        return LayerListResponse(total=total, layers=out)
 
     @app.get(f"{settings.api_prefix}/layers/{{layer_id}}/{{view_name}}.png")
     def get_layer_image(layer_id: str, view_name: str) -> FileResponse:

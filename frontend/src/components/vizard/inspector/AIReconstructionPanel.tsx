@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import {
   useCreateReconstructionJobMutation,
   useLayerSummaryQuery,
+  useRecentLayersQuery,
   useReconstructionJobQuery,
   useScenesQuery,
 } from "@/hooks/use-vizard-api";
@@ -76,6 +77,7 @@ export function AIReconstructionPanel({ compact }: { compact?: boolean } = {}) {
   const createMutation = useCreateReconstructionJobMutation();
   const jobQuery = useReconstructionJobQuery(aiJobId, Boolean(aiJobId));
   const summaryQuery = useLayerSummaryQuery(activeLayerId);
+  const recentLayersQuery = useRecentLayersQuery(30, true);
 
   const sortedScenes = useMemo(() => {
     const list = scenesQuery.data?.scenes ?? [];
@@ -108,6 +110,17 @@ export function AIReconstructionPanel({ compact }: { compact?: boolean } = {}) {
       model_mode: MODEL_MODE_MAP[modelMode] ?? "balanced",
     });
     setAiJob(created.job_id, sceneId);
+  }
+
+  function handleUsePreparedDemo() {
+    const layers = recentLayersQuery.data?.layers ?? [];
+    if (layers.length === 0) return;
+    const best =
+      layers.find((l) => {
+        const mode = (l.summary?.model_mode_effective as string | undefined) ?? "";
+        return mode === "balanced" || mode === "precise";
+      }) ?? layers[0];
+    setAiStatus("completed", 1.0, best.layer_id);
   }
 
   const latestJobError = jobQuery.data?.status === "failed" ? jobQuery.data.error : null;
@@ -209,6 +222,14 @@ export function AIReconstructionPanel({ compact }: { compact?: boolean } = {}) {
             )}
           </Button>
           {(aiRunning || createMutation.isPending) && <Progress value={Math.round(aiProgress * 100)} className="mt-2 h-1.5" />}
+          <Button
+            variant="outline"
+            className="w-full mt-2 h-9"
+            onClick={handleUsePreparedDemo}
+            disabled={recentLayersQuery.isLoading || !recentLayersQuery.data || recentLayersQuery.data.layers.length === 0}
+          >
+            Загрузить готовый демо-слой
+          </Button>
         </Section>
 
         {latestJobError && (

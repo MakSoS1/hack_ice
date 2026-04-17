@@ -1,0 +1,11 @@
+{
+  "layer_id": "a74c0665-3dd5-4648-9276-48d6b5c6ffaa",
+  "scene_id": "S1A_EW_GRDM_1SDH_20250213T012812_20250213T012912_057871_072378_11A0",
+  "coverage_before": 0.6065339716970728,
+  "coverage_after": 1.0,
+  "restored_area_km2": 107838.62215849878,
+  "mean_confidence": 0.556024432182312,
+  "high_confidence_ratio": 0.01721759117001859,
+  "low_confidence_ratio": 0.9827824088299814,
+  "changed_pixels_ratio": 0.9996158223885315
+}

@@ -1,0 +1,47 @@
+{
+  "description": "Default IceClass RGB palette and routing costs for Vizard Arctic MVP.",
+  "classes": [
+    {
+      "id": 0,
+      "name": "open_water_or_low_ice",
+      "rgb": [0, 250, 0],
+      "cost": 1.0
+    },
+    {
+      "id": 1,
+      "name": "thin_first_year_ice",
+      "rgb": [255, 243, 171],
+      "cost": 2.2
+    },
+    {
+      "id": 2,
+      "name": "medium_first_year_ice",
+      "rgb": [200, 200, 0],
+      "cost": 3.1
+    },
+    {
+      "id": 3,
+      "name": "thick_first_year_ice",
+      "rgb": [150, 150, 150],
+      "cost": 4.4
+    },
+    {
+      "id": 4,
+      "name": "old_or_compact_ice",
+      "rgb": [255, 0, 250],
+      "cost": 6.5
+    },
+    {
+      "id": 5,
+      "name": "land_or_artifact",
+      "rgb": [1, 1, 1],
+      "cost": 9999.0
+    }
+  ],
+  "unknown_class": {
+    "id": 255,
+    "name": "unknown",
+    "rgb": [0, 0, 0],
+    "cost": 8.0
+  }
+}

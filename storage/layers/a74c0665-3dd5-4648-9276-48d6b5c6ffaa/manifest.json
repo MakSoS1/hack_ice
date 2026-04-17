@@ -1,0 +1,51 @@
+{
+  "layer_id": "a74c0665-3dd5-4648-9276-48d6b5c6ffaa",
+  "scene_id": "S1A_EW_GRDM_1SDH_20250213T012812_20250213T012912_057871_072378_11A0",
+  "bounds": [
+    76.20356953534247,
+    73.69355960666519,
+    95.98767233677573,
+    78.35446228081865
+  ],
+  "coordinates": [
+    [
+      76.20356953534247,
+      78.35446228081865
+    ],
+    [
+      95.98767233677573,
+      78.35446228081865
+    ],
+    [
+      95.98767233677573,
+      73.69355960666519
+    ],
+    [
+      76.20356953534247,
+      73.69355960666519
+    ]
+  ],
+  "created_at": "2026-04-17T10:17:26.023483+00:00",
+  "views": [
+    {
+      "name": "observed",
+      "url": "/api/v1/layers/a74c0665-3dd5-4648-9276-48d6b5c6ffaa/observed.png",
+      "opacity": 0.9
+    },
+    {
+      "name": "reconstructed",
+      "url": "/api/v1/layers/a74c0665-3dd5-4648-9276-48d6b5c6ffaa/reconstructed.png",
+      "opacity": 0.9
+    },
+    {
+      "name": "confidence",
+      "url": "/api/v1/layers/a74c0665-3dd5-4648-9276-48d6b5c6ffaa/confidence.png",
+      "opacity": 0.85
+    },
+    {
+      "name": "difference",
+      "url": "/api/v1/layers/a74c0665-3dd5-4648-9276-48d6b5c6ffaa/difference.png",
+      "opacity": 0.9
+    }
+  ]
+}

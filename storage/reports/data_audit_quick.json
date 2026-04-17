@@ -1,0 +1,127 @@
+{
+  "generated_at_utc": "2026-04-17T11:10:39.807340+00:00",
+  "paths": {
+    "ice_dir": "C:\\Users\\maksi\\Downloads\\vizard_iceclass\\Dataset_2025_IceClass",
+    "composite_dir": "C:\\Users\\maksi\\Downloads\\vizard_composite\\Dataset_2025_composite",
+    "palette_path": "C:\\Users\\maksi\\projects\\vizard-arctic\\configs\\ice_palette.json"
+  },
+  "counts": {
+    "ice_tif": 410,
+    "composite_tif": 410,
+    "paired_intersection": 409,
+    "paired_evaluated": 120,
+    "ice_unpaired_estimate": 1,
+    "composite_unpaired_estimate": 1
+  },
+  "filename_validation": {
+    "invalid_scene_ids": 0,
+    "invalid_examples": [],
+    "mission_counts": {
+      "S1A": 120
+    },
+    "mode_counts": {
+      "EW": 120
+    },
+    "product_counts": {
+      "GRDM": 120
+    },
+    "level_polarization_counts": {
+      "1SDH": 120
+    },
+    "orbit_prefix_counts_top10": {
+      "058": 60,
+      "059": 57,
+      "057": 3
+    }
+  },
+  "time_distribution": {
+    "first_scene_utc": "2025-02-13T01:29:12+00:00",
+    "last_scene_utc": "2025-07-05T03:23:24+00:00",
+    "delta_minutes_summary": {
+      "min": 1.0,
+      "p05": 1.0,
+      "p25": 3.0833333333333335,
+      "p50": 393.8,
+      "p75": 1727.3666666666668,
+      "p95": 7208.338333333333,
+      "max": 15796.85,
+      "mean": 1719.2789915966387
+    },
+    "delta_minutes_median": 393.8
+  },
+  "geometry": {
+    "shape_counts_top10": {
+      "4937x14185": 3,
+      "4174x14308": 2,
+      "4189x14305": 2,
+      "4185x14281": 2,
+      "2770x14945": 2,
+      "3404x14370": 2,
+      "4185x14279": 2,
+      "3403x14369": 2,
+      "3415x14369": 2,
+      "3180x12048": 2
+    },
+    "height_summary": {
+      "min": 609.0,
+      "p05": 2735.9,
+      "p25": 2768.25,
+      "p50": 3406.0,
+      "p75": 4189.0,
+      "p95": 5070.3,
+      "max": 5089.0,
+      "mean": 3574.758333333333
+    },
+    "width_summary": {
+      "min": 11922.0,
+      "p05": 12485.2,
+      "p25": 14297.25,
+      "p50": 14333.0,
+      "p75": 14896.75,
+      "p95": 15696.1,
+      "max": 29284.0,
+      "mean": 14532.375
+    },
+    "lon_range": [
+      -14.896214084446939,
+      199.7491657008052
+    ],
+    "lat_range": [
+      66.64591652915183,
+      82.06689734956801
+    ]
+  },
+  "gap_ratio": {
+    "summary": {
+      "min": 0.3308467938878631,
+      "p05": 0.3432482715285606,
+      "p25": 0.3582466781416909,
+      "p50": 0.3909760654861786,
+      "p75": 0.44746543412780315,
+      "p95": 0.4522954637247452,
+      "max": 0.9574087207571893,
+      "mean": 0.3993847250454969
+    },
+    "bins": {
+      "lt_10": 0,
+      "10_20": 0,
+      "20_30": 0,
+      "30_40": 82,
+      "40_50": 37,
+      "ge_50": 1
+    },
+    "by_month_mean": {
+      "2": 0.3766087064724767,
+      "3": 0.38530415829607895,
+      "4": 0.4095178395324008,
+      "5": 0.3934486121159656,
+      "6": 0.4127413263392482,
+      "7": 0.41434494858593807
+    }
+  },
+  "class_histogram_sample": {
+    "sample_scenes": 0,
+    "sample_stride": 16,
+    "class_share": {}
+  }
+}

@@ -36,6 +36,28 @@ const BASE_STYLE: maplibregl.StyleSpecification = {
 
 const WEBGL_FALLBACK_MESSAGE =
   "Карта работает в 2D-режиме (без WebGL). Это нормально для браузеров/окружений, где GPU-контекст недоступен.";
+const BLANK_FRAME_FALLBACK_MESSAGE =
+  "Обнаружен пустой кадр карты. Автоматически переключили отображение на стабильный 2D-режим.";
+const RENDERER_STORAGE_KEY = "vizard_map_renderer_mode";
+
+function readRendererModeFromStorage(): RendererMode {
+  if (typeof window === "undefined") return "maplibre";
+  try {
+    const raw = window.localStorage.getItem(RENDERER_STORAGE_KEY);
+    return raw === "leaflet" ? "leaflet" : "maplibre";
+  } catch {
+    return "maplibre";
+  }
+}
+
+function persistRendererMode(mode: RendererMode): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(RENDERER_STORAGE_KEY, mode);
+  } catch {
+    // noop
+  }
+}
 
 function isWebGLError(error: unknown): boolean {
   const raw = error instanceof Error ? error.message : String(error);
@@ -135,6 +157,65 @@ function clearMapLibreRoutes(map: MapLibreMap) {
 
 type RendererMode = "maplibre" | "leaflet";
 
+function safeRemoveMaplibreMap(map: MapLibreMap | null): void {
+  if (!map) return;
+  try {
+    map.remove();
+  } catch {
+    // Guard against duplicate remove() during fast renderer switches / StrictMode.
+  }
+}
+
+function safeRemoveLeafletMap(map: L.Map | null): void {
+  if (!map) return;
+  try {
+    map.remove();
+  } catch {
+    // Guard against duplicate remove() during fast renderer switches / StrictMode.
+  }
+}
+
+function isCanvasLikelyBlank(canvas: HTMLCanvasElement): boolean {
+  try {
+    const gl =
+      (canvas.getContext("webgl2", { preserveDrawingBuffer: true }) as WebGL2RenderingContext | null) ??
+      (canvas.getContext("webgl", { preserveDrawingBuffer: true }) as WebGLRenderingContext | null) ??
+      (canvas.getContext("experimental-webgl", { preserveDrawingBuffer: true }) as WebGLRenderingContext | null);
+    if (!gl) return true;
+
+    const w = Math.max(1, gl.drawingBufferWidth || canvas.width);
+    const h = Math.max(1, gl.drawingBufferHeight || canvas.height);
+    if (w < 2 || h < 2) return true;
+
+    const probes = [
+      [0.18, 0.18], [0.5, 0.18], [0.82, 0.18],
+      [0.18, 0.5], [0.5, 0.5], [0.82, 0.5],
+      [0.18, 0.82], [0.5, 0.82], [0.82, 0.82],
+    ] as const;
+    const px = new Uint8Array(4);
+    const unique = new Set<string>();
+    let minL = Number.POSITIVE_INFINITY;
+    let maxL = Number.NEGATIVE_INFINITY;
+
+    for (const [nx, ny] of probes) {
+      const x = Math.min(w - 1, Math.max(0, Math.floor(nx * w)));
+      const y = Math.min(h - 1, Math.max(0, Math.floor(ny * h)));
+      gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      const key = `${px[0]},${px[1]},${px[2]},${px[3]}`;
+      unique.add(key);
+
+      const luma = px[0] * 0.2126 + px[1] * 0.7152 + px[2] * 0.0722;
+      minL = Math.min(minL, luma);
+      maxL = Math.max(maxL, luma);
+      if (unique.size > 5) return false;
+    }
+
+    return unique.size <= 2 || maxL - minL < 3;
+  } catch {
+    return false;
+  }
+}
+
 export function MapCanvas() {
   const { enabledLayers, aiView, aiCompleted, activeLayerId, routeResult, selectVessel } = useVizard();
   const { isMobile } = useBreakpoint();
@@ -146,7 +227,7 @@ export function MapCanvas() {
   const leafletRoutesRef = useRef<Record<string, L.Polyline>>({});
   const hasFittedRef = useRef(false);
 
-  const [rendererMode, setRendererMode] = useState<RendererMode>("maplibre");
+  const [rendererMode, setRendererMode] = useState<RendererMode>(() => readRendererModeFromStorage());
   const [mapError, setMapError] = useState<string | null>(null);
 
   const manifestQuery = useLayerManifestQuery(activeLayerId);
@@ -160,12 +241,16 @@ export function MapCanvas() {
   const defaultLeafletBounds = useMemo(() => L.latLngBounds([66, 20], [82, 130]), []);
 
   useEffect(() => {
+    persistRendererMode(rendererMode);
+  }, [rendererMode]);
+
+  useEffect(() => {
     if (!containerRef.current) return;
 
     if (rendererMode === "maplibre") {
       // Cleanup fallback map if we are switching back.
       if (leafletRef.current) {
-        leafletRef.current.remove();
+        safeRemoveLeafletMap(leafletRef.current);
         leafletRef.current = null;
         leafletOverlaysRef.current = {};
         leafletRoutesRef.current = {};
@@ -202,13 +287,26 @@ export function MapCanvas() {
 
       maplibreRef.current = map;
       setMapError(null);
+      let healthInterval: number | null = null;
+      let disposed = false;
+
+      const disposeMap = () => {
+        if (disposed) return;
+        disposed = true;
+        if (healthInterval !== null) {
+          window.clearInterval(healthInterval);
+          healthInterval = null;
+        }
+        map.off("error", onError);
+        safeRemoveMaplibreMap(map);
+        if (maplibreRef.current === map) maplibreRef.current = null;
+      };
 
       const onError = (ev: maplibregl.ErrorEvent) => {
         const err = (ev as { error?: unknown }).error;
         if (!err) return;
         if (isWebGLError(err)) {
-          map.remove();
-          maplibreRef.current = null;
+          disposeMap();
           hasFittedRef.current = false;
           setRendererMode("leaflet");
           setMapError(WEBGL_FALLBACK_MESSAGE);
@@ -218,6 +316,33 @@ export function MapCanvas() {
       };
 
       map.on("error", onError);
+      let healthChecks = 0;
+      healthInterval = window.setInterval(() => {
+        if (maplibreRef.current !== map) {
+          if (healthInterval !== null) {
+            window.clearInterval(healthInterval);
+            healthInterval = null;
+          }
+          return;
+        }
+        healthChecks += 1;
+        const styleReady = map.isStyleLoaded();
+        const tilesReady = typeof map.areTilesLoaded === "function" ? map.areTilesLoaded() : true;
+        const shouldProbe = (styleReady && tilesReady) || healthChecks >= 6;
+        if (!shouldProbe) return;
+
+        if (healthInterval !== null) {
+          window.clearInterval(healthInterval);
+          healthInterval = null;
+        }
+        if (!isCanvasLikelyBlank(map.getCanvas())) return;
+
+        disposeMap();
+        hasFittedRef.current = false;
+        setRendererMode("leaflet");
+        setMapError(BLANK_FRAME_FALLBACK_MESSAGE);
+      }, 2000);
+
       map.on("load", () => {
         map.fitBounds(defaultBounds, { padding: 20, duration: 0 });
 
@@ -278,15 +403,15 @@ export function MapCanvas() {
       });
 
       return () => {
-        map.remove();
-        if (maplibreRef.current === map) maplibreRef.current = null;
+        disposeMap();
       };
     }
 
     // Leaflet fallback (no WebGL required).
     if (maplibreRef.current) {
-      maplibreRef.current.remove();
+      const staleMaplibre = maplibreRef.current;
       maplibreRef.current = null;
+      safeRemoveMaplibreMap(staleMaplibre);
     }
     if (leafletRef.current) return;
 
@@ -345,7 +470,7 @@ export function MapCanvas() {
     setMapError(WEBGL_FALLBACK_MESSAGE);
 
     return () => {
-      map.remove();
+      safeRemoveLeafletMap(map);
       if (leafletRef.current === map) leafletRef.current = null;
       leafletOverlaysRef.current = {};
       leafletRoutesRef.current = {};

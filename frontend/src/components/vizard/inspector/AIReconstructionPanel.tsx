@@ -115,11 +115,13 @@ export function AIReconstructionPanel({ compact }: { compact?: boolean } = {}) {
   function handleUsePreparedDemo() {
     const layers = recentLayersQuery.data?.layers ?? [];
     if (layers.length === 0) return;
+    const sameSceneLayers = sceneId ? layers.filter((l) => l.scene_id === sceneId) : [];
+    const pickFrom = sameSceneLayers.length > 0 ? sameSceneLayers : layers;
     const best =
-      layers.find((l) => {
+      pickFrom.find((l) => {
         const mode = (l.summary?.model_mode_effective as string | undefined) ?? "";
         return mode === "balanced" || mode === "precise";
-      }) ?? layers[0];
+      }) ?? pickFrom[0];
     setAiStatus("completed", 1.0, best.layer_id);
   }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MapCanvas } from "@/components/vizard/MapCanvas";
 import { InspectorContent } from "@/components/vizard/RightInspector";
 import { ReportModal } from "@/components/vizard/ReportModal";
@@ -13,6 +13,7 @@ import { useBreakpoint } from "@/hooks/use-mobile";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { LeftSidebar } from "@/components/vizard/LeftSidebar";
+import { listRecentLayers, solveRoute } from "@/lib/api-client";
 
 interface VizardShellProps {
   initialMode?: InspectorMode;
@@ -21,7 +22,8 @@ interface VizardShellProps {
 }
 
 export function VizardShell({ initialMode, reportOpen: extOpen, setReportOpen: extSetOpen }: VizardShellProps) {
-  const { setInspectorMode, inspectorMode, activeLayerSummary, aiCompleted } = useVizard();
+  const { setInspectorMode, inspectorMode, activeLayerSummary, aiCompleted, setAiStatus, setRouteResult, activeLayerId } = useVizard();
+  const autoloadRef = useRef(false);
   const [localOpen, setLocalOpen] = useState(false);
   const open = extOpen ?? localOpen;
   const setOpen = extSetOpen ?? setLocalOpen;
@@ -36,14 +38,51 @@ export function VizardShell({ initialMode, reportOpen: extOpen, setReportOpen: e
   }, [initialMode, setInspectorMode]);
 
   useEffect(() => {
+    if (autoloadRef.current) return;
+    autoloadRef.current = true;
+    listRecentLayers(30, 0)
+      .then((res) => {
+        const layers = res.layers ?? [];
+        if (layers.length === 0) return;
+        const best =
+          layers.find((l) => {
+            const mode = (l.summary?.model_mode_effective as string | undefined) ?? "";
+            return mode === "balanced" || mode === "precise";
+          }) ?? layers[0];
+        setAiStatus("completed", 1.0, best.layer_id);
+        setInspectorMode("ai");
+        setPanelOpen(true);
+      })
+      .catch(() => {
+        setInspectorMode("ai");
+        setPanelOpen(true);
+      });
+  }, [setAiStatus, setInspectorMode]);
+
+  useEffect(() => {
     if (inspectorMode !== "empty") {
       setPanelOpen(true);
     }
   }, [inspectorMode]);
 
+  useEffect(() => {
+    if (!aiCompleted || !activeLayerId) return;
+    solveRoute({
+      layer_id: activeLayerId,
+      start_lon: 50.0,
+      start_lat: 75.0,
+      end_lon: 65.0,
+      end_lat: 76.5,
+      vessel_class: "Arc7",
+      confidence_penalty: 2.0,
+    })
+      .then((r) => setRouteResult(r))
+      .catch(() => {});
+  }, [aiCompleted, activeLayerId, setRouteResult]);
+
   if (isMobile) {
     return (
-      <div className="h-[100dvh] w-screen bg-chrome overflow-hidden">
+      <div className="relative h-[100dvh] w-screen bg-chrome overflow-hidden">
         <MapCanvas />
 
         <FloatingSearch />
@@ -57,7 +96,7 @@ export function VizardShell({ initialMode, reportOpen: extOpen, setReportOpen: e
         <FloatingTimeline />
 
         {aiCompleted && activeLayerSummary && (
-          <div className="absolute top-3 right-3 z-30 pointer-events-auto bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-2.5 min-w-[130px] border border-border/50">
+          <div className="absolute top-14 right-3 z-30 pointer-events-auto bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-2.5 min-w-[130px] border border-border/50">
             <div className="text-[10px] text-muted-foreground mb-0.5">Покрытие</div>
             <div className="text-xl font-bold text-status-current leading-none">
               {Math.round(activeLayerSummary.coverage_after * 100)}%
@@ -98,7 +137,7 @@ export function VizardShell({ initialMode, reportOpen: extOpen, setReportOpen: e
   }
 
   return (
-    <div className="h-screen w-screen bg-chrome overflow-hidden">
+    <div className="relative h-screen w-screen bg-chrome overflow-hidden">
       <MapCanvas />
 
       <FloatingSearch />
@@ -113,7 +152,7 @@ export function VizardShell({ initialMode, reportOpen: extOpen, setReportOpen: e
       <FloatingTimeline />
 
       {aiCompleted && activeLayerSummary && (
-        <div className="absolute top-3 right-3 z-30 pointer-events-auto bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-3 min-w-[150px] border border-border/50">
+        <div className="absolute top-[100px] right-3 z-30 pointer-events-auto bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-3 min-w-[150px] border border-border/50">
           <div className="text-[10px] text-muted-foreground mb-0.5">AI результат</div>
           <div className="text-2xl font-bold text-status-current leading-none">
             {Math.round(activeLayerSummary.coverage_after * 100)}%

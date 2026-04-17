@@ -39,6 +39,9 @@ const WEBGL_FALLBACK_MESSAGE =
 const BLANK_FRAME_FALLBACK_MESSAGE =
   "Обнаружен пустой кадр карты. Автоматически переключили отображение на стабильный 2D-режим.";
 const RENDERER_STORAGE_KEY = "vizard_map_renderer_mode";
+const CAMERA_MODE_STORAGE_KEY = "vizard_map_camera_mode";
+
+type CameraMode = "2d" | "3d";
 
 function readRendererModeFromStorage(): RendererMode {
   if (typeof window === "undefined") return "maplibre";
@@ -54,6 +57,25 @@ function persistRendererMode(mode: RendererMode): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(RENDERER_STORAGE_KEY, mode);
+  } catch {
+    // noop
+  }
+}
+
+function readCameraModeFromStorage(): CameraMode {
+  if (typeof window === "undefined") return "3d";
+  try {
+    const raw = window.localStorage.getItem(CAMERA_MODE_STORAGE_KEY);
+    return raw === "2d" ? "2d" : "3d";
+  } catch {
+    return "3d";
+  }
+}
+
+function persistCameraMode(mode: CameraMode): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(CAMERA_MODE_STORAGE_KEY, mode);
   } catch {
     // noop
   }
@@ -157,6 +179,29 @@ function clearMapLibreRoutes(map: MapLibreMap) {
 
 type RendererMode = "maplibre" | "leaflet";
 
+function applyMapLibreCameraMode(map: MapLibreMap, mode: CameraMode, animate = true): void {
+  if (mode === "3d") {
+    map.dragRotate.enable();
+    map.touchZoomRotate.enableRotation();
+    map.easeTo({
+      pitch: 55,
+      bearing: -20,
+      duration: animate ? 550 : 0,
+      essential: true,
+    });
+    return;
+  }
+
+  map.touchZoomRotate.disableRotation();
+  map.dragRotate.disable();
+  map.easeTo({
+    pitch: 0,
+    bearing: 0,
+    duration: animate ? 450 : 0,
+    essential: true,
+  });
+}
+
 function safeRemoveMaplibreMap(map: MapLibreMap | null): void {
   if (!map) return;
   try {
@@ -228,6 +273,7 @@ export function MapCanvas() {
   const hasFittedRef = useRef(false);
 
   const [rendererMode, setRendererMode] = useState<RendererMode>(() => readRendererModeFromStorage());
+  const [cameraMode, setCameraMode] = useState<CameraMode>(() => readCameraModeFromStorage());
   const [mapError, setMapError] = useState<string | null>(null);
 
   const manifestQuery = useLayerManifestQuery(activeLayerId);
@@ -243,6 +289,17 @@ export function MapCanvas() {
   useEffect(() => {
     persistRendererMode(rendererMode);
   }, [rendererMode]);
+
+  useEffect(() => {
+    persistCameraMode(cameraMode);
+  }, [cameraMode]);
+
+  useEffect(() => {
+    if (rendererMode !== "maplibre") return;
+    const map = maplibreRef.current;
+    if (!map) return;
+    applyMapLibreCameraMode(map, cameraMode, true);
+  }, [rendererMode, cameraMode]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -272,7 +329,11 @@ export function MapCanvas() {
           zoom: 3,
           minZoom: 2,
           maxZoom: 9,
-          maxPitch: 0,
+          pitch: cameraMode === "3d" ? 55 : 0,
+          bearing: cameraMode === "3d" ? -20 : 0,
+          maxPitch: 70,
+          dragRotate: cameraMode === "3d",
+          touchPitch: cameraMode === "3d",
         });
       } catch (error) {
         if (isWebGLError(error)) {
@@ -344,6 +405,7 @@ export function MapCanvas() {
       }, 2000);
 
       map.on("load", () => {
+        applyMapLibreCameraMode(map, cameraMode, false);
         map.fitBounds(defaultBounds, { padding: 20, duration: 0 });
 
         map.addSource("vessels", {
@@ -475,7 +537,7 @@ export function MapCanvas() {
       leafletOverlaysRef.current = {};
       leafletRoutesRef.current = {};
     };
-  }, [rendererMode, defaultBounds, defaultLeafletBounds, selectVessel]);
+  }, [rendererMode, cameraMode, defaultBounds, defaultLeafletBounds, selectVessel]);
 
   useEffect(() => {
     const manifest = manifestQuery.data;
@@ -684,9 +746,13 @@ export function MapCanvas() {
     maplibreRef.current?.fitBounds(defaultBounds, { padding: 20, duration: 700 });
   };
 
+  const handleToggleCameraMode = () => {
+    setCameraMode((prev) => (prev === "3d" ? "2d" : "3d"));
+  };
+
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="absolute inset-0 bg-map-water">
+      <div className="absolute inset-0 bg-map-water z-0 isolate">
         <div ref={containerRef} className="absolute inset-0" />
         {mapError && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 pointer-events-auto bg-status-error/10 border border-status-error/40 text-foreground rounded-md px-3 py-2 text-xs max-w-[90vw]">
@@ -736,6 +802,25 @@ export function MapCanvas() {
                 <TooltipContent side="left">{c.label}</TooltipContent>
               </Tooltip>
             ))}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={cn("h-8 w-8 flex items-center justify-center text-foreground hover:bg-muted/80 transition-colors border-t border-border/30")}
+                  aria-label={cameraMode === "3d" ? "Переключить в 2D" : "Переключить в 3D"}
+                  onClick={handleToggleCameraMode}
+                  title={rendererMode === "leaflet" ? "3D доступно в режиме WebGL" : undefined}
+                >
+                  <span className="text-[10px] font-semibold tracking-wide">{cameraMode === "3d" ? "3D" : "2D"}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="left">
+                {rendererMode === "leaflet"
+                  ? "3D доступно в режиме WebGL"
+                  : cameraMode === "3d"
+                    ? "Переключить в 2D"
+                    : "Переключить в 3D"}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </div>

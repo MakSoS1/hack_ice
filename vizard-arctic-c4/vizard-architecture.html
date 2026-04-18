@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Vizard Arctic — C4 Architecture</title>
+<style>
+  @page { size: A4 landscape; margin: 15mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1a1a2e; background: #fff; line-height: 1.6; }
+  h1 { font-size: 28px; margin-bottom: 8px; color: #16213e; border-bottom: 3px solid #0f3460; padding-bottom: 8px; }
+  h2 { font-size: 22px; margin-top: 30px; margin-bottom: 10px; color: #0f3460; border-bottom: 2px solid #e94560; padding-bottom: 4px; }
+  h3 { font-size: 18px; margin-top: 20px; margin-bottom: 8px; color: #533483; }
+  p, li { font-size: 14px; margin-bottom: 6px; }
+  ul { margin-left: 20px; }
+  .page-break { page-break-after: always; }
+  .diagram { text-align: center; margin: 20px 0; }
+  .diagram img { max-width: 100%; max-height: 480px; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  .cover { text-align: center; padding-top: 120px; }
+  .cover h1 { font-size: 42px; border: none; color: #0f3460; }
+  .cover h2 { font-size: 24px; color: #533483; border: none; margin-top: 10px; }
+  .cover p { font-size: 16px; margin-top: 30px; color: #666; }
+  .section-desc { background: #f8f9fa; border-left: 4px solid #0f3460; padding: 12px 16px; margin: 12px 0; border-radius: 0 6px 6px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+  th { background: #0f3460; color: #fff; }
+  tr:nth-child(even) { background: #f4f4f8; }
+  .tech-tag { display: inline-block; background: #e8eaf6; color: #283593; border-radius: 4px; padding: 2px 8px; font-size: 12px; margin: 2px; }
+</style>
+</head>
+<body>
+
+<!-- COVER PAGE -->
+<div class="cover">
+  <h1>Vizard Arctic</h1>
+  <h2>C4 Architecture Document</h2>
+  <p>End-to-end система заполнения ледовых пропусков и маршрутизации судов в Арктике</p>
+  <p>Версия 1.0 | Апрель 2026</p>
+  <p>Удалённый деплой: Windows 10.78.211.199 | GPU: RTX 2060 SUPER 8GB</p>
+</div>
+
+<div class="page-break"></div>
+
+<!-- TABLE OF CONTENTS -->
+<h1>Содержание</h1>
+<ul>
+  <li>1. System Context — общий контекст системы</li>
+  <li>2. Container View — контейнеры внутри системы</li>
+  <li>3. Backend API — Component View</li>
+  <li>4. Frontend SPA — Component View</li>
+  <li>5. ML Pipeline — Component View</li>
+  <li>6. Reconstruction Flow — динамический процесс</li>
+  <li>7. Route Planning Flow — динамический процесс</li>
+  <li>8. API Contract</li>
+  <li>9. Технологический стек</li>
+  <li>10. Инфраструктура и деплой</li>
+</ul>
+
+<div class="page-break"></div>
+
+<!-- 1. SYSTEM CONTEXT -->
+<h1>1. System Context</h1>
+<div class="section-desc">
+  Vizard Arctic — система, которая читает спутниковые данные Sentinel-1 (IceClass + Composite GeoTIFF),
+  заполняет ледовые пропуски (gap filling) с помощью Temporal U-Net и прокладывает оптимальные
+  маршруты судов через Северный морской путь с учётом ледовых классов и confidence.
+</div>
+
+<div class="diagram">
+  <img src="png/context.png" alt="System Context View">
+</div>
+
+<h3>Внешние актёры и системы</h3>
+<table>
+  <tr><th>Элемент</th><th>Тип</th><th>Описание</th></tr>
+  <tr><td>Оператор</td><td>Person</td><td>Пользователь, запускающий реконструкцию и прокладывающий маршруты</td></tr>
+  <tr><td>Sentinel-1 Data</td><td>System</td><td>Спутниковые данные ESA: IceClass TIFF + Composite TIFF с gap-масками</td></tr>
+  <tr><td>GPU Server</td><td>System</td><td>Windows-хост 10.78.211.199, RTX 2060 SUPER 8GB для U-Net инференса</td></tr>
+  <tr><td>MapLibre GL Tiles</td><td>System</td><td>Картографические тайлы для визуализации арктического региона</td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<!-- 2. CONTAINER VIEW -->
+<h1>2. Container View</h1>
+<div class="section-desc">
+  Четыре контейнера внутри Vizard Arctic: Frontend SPA (React+MapLibre),
+  Backend API (FastAPI+SQLite), ML Pipeline (PyTorch), Storage & Config (файловая система+JSON).
+</div>
+
+<div class="diagram">
+  <img src="png/container.png" alt="Container View">
+</div>
+
+<table>
+  <tr><th>Контейнер</th><th>Технология</th><th>Описание</th></tr>
+  <tr><td>Frontend SPA</td><td><span class="tech-tag">React</span><span class="tech-tag">Vite</span><span class="tech-tag">MapLibre GL</span><span class="tech-tag">Zustand</span><span class="tech-tag">TailwindCSS</span></td><td>Картографический UI: инспектор слоёв, AI-панель, маршрутизация, справочник судов</td></tr>
+  <tr><td>Backend API</td><td><span class="tech-tag">FastAPI</span><span class="tech-tag">Uvicorn</span><span class="tech-tag">SQLite WAL</span><span class="tech-tag">Pydantic</span></td><td>REST-сервис: управление сценами, джобы реконструкции, публикация слоёв, A* маршрутизация</td></tr>
+  <tr><td>ML Pipeline</td><td><span class="tech-tag">PyTorch</span><span class="tech-tag">OpenCV</span><span class="tech-tag">tifffile</span><span class="tech-tag">NumPy</span></td><td>Temporal U-Net: обучение, тайловый инференс, бенчмарк. Режимы fast/balanced/precise</td></tr>
+  <tr><td>Storage & Config</td><td><span class="tech-tag">SQLite</span><span class="tech-tag">JSON</span><span class="tech-tag">NPZ</span><span class="tech-tag">PNG</span></td><td>metadata.db, слой-артефакты (PNG, NPZ, manifest), ice_palette.json, checkpoint</td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<!-- 3. BACKEND COMPONENTS -->
+<h1>3. Backend API — Component View</h1>
+<div class="section-desc">
+  Backend API состоит из 10 компонентов: FastAPI App (точка входа), SceneIndex (индекс сцен),
+  JobManager (очередь джоб), Reconstruction Engine (ядро gap-filling), Route Solver (A*),
+  MetadataDB (SQLite), IceClass Palette (цветовая маппинг), AOI Mask (область интереса),
+  Pydantic Schemas (типы API), Settings (конфигурация).
+</div>
+
+<div class="diagram">
+  <img src="png/backendComponents.png" alt="Backend Component View">
+</div>
+
+<table>
+  <tr><th>Компонент</th><th>Файл</th><th>Описание</th></tr>
+  <tr><td>FastAPI App</td><td>backend/app/main.py</td><td>Корневое приложение: CORS, маршруты, AppState, обработчики запросов</td></tr>
+  <tr><td>SceneIndex</td><td>backend/app/scene_index.py</td><td>Индекс сцен Sentinel-1: парсинг имён, чтение GeoTIFF, gap-маски, исторические сцены, гео-координаты</td></tr>
+  <tr><td>JobManager</td><td>backend/app/jobs.py</td><td>Очередь реконструкции: ThreadPoolExecutor(2), кэширование по params_hash, прогресс-обновления</td></tr>
+  <tr><td>Reconstruction Engine</td><td>backend/app/reconstruction.py</td><td>Ядро: чтение IceClass RGB, gap-маска, temporal fill, U-Net prediction, PNG-экспорт, route_grid</td></tr>
+  <tr><td>Route Solver (A*)</td><td>backend/app/route_solver.py</td><td>A* маршрутизация: ice class cost + vessel multiplier + confidence penalty, corridor penalty для альтернатив</td></tr>
+  <tr><td>MetadataDB</td><td>backend/app/db.py</td><td>SQLite WAL: таблицы jobs/layers, thread-safe, upsert с dedup по (scene_id, params_hash)</td></tr>
+  <tr><td>IceClass Palette</td><td>backend/app/palette.py</td><td>RGB &lt;-&gt; class_id маппинг, cost grid, nearest tolerance matching</td></tr>
+  <tr><td>AOI Mask Provider</td><td>backend/app/aoi_mask.py</td><td>Растровка GeoJSON/Shapefile полигонов (Россия, навигация) в бинарные маски AOI</td></tr>
+  <tr><td>Pydantic Schemas</td><td>backend/app/schemas.py</td><td>API типы: SceneMetadata, ReconstructionJob*, LayerManifest*, RouteSolve*, LayerSummary*</td></tr>
+  <tr><td>Settings</td><td>backend/app/settings.py</td><td>Env vars: VIZARD_ICECLASS_DIR, VIZARD_COMPOSITE_DIR, VIZARD_MODEL_CKPT, VIZARD_MODEL_DEVICE, etc.</td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<!-- 4. FRONTEND COMPONENTS -->
+<h1>4. Frontend SPA — Component View</h1>
+<div class="section-desc">
+  Frontend SPA состоит из 11 компонентов: VizardShell (главный layout), MapCanvas (карта MapLibre),
+  LeftSidebar (сцены + таймлайн), RightInspector (панель контекста с 4 вкладками),
+  AI Reconstruction Panel, Routing Panel, Vessel Panel, Layer Info Panel,
+  Vizard Store (Zustand), API Client.
+</div>
+
+<div class="diagram">
+  <img src="png/frontendComponents.png" alt="Frontend Component View">
+</div>
+
+<table>
+  <tr><th>Компонент</th><th>Файл</th><th>Описание</th></tr>
+  <tr><td>VizardShell</td><td>components/vizard/VizardShell.tsx</td><td>Главный layout: TopBar + LeftSidebar + MapCanvas + RightInspector + Floating panels</td></tr>
+  <tr><td>MapCanvas</td><td>components/vizard/MapCanvas.tsx</td><td>Интерактивная карта MapLibre GL: растровые слои, маршруты, ROI</td></tr>
+  <tr><td>LeftSidebar</td><td>components/vizard/LeftSidebar.tsx</td><td>Панель сцен: FloatingSearch + FloatingTimeline</td></tr>
+  <tr><td>RightInspector</td><td>components/vizard/RightInspector.tsx</td><td>Панель инспектора: LayerInfo / AI Reconstruction / Routing / Vessel / Empty</td></tr>
+  <tr><td>AI Reconstruction Panel</td><td>inspector/AIReconstructionPanel.tsx</td><td>Запуск джобы, наблюдение прогресса, переключение view (observation/reconstruction/confidence/diff)</td></tr>
+  <tr><td>Routing Panel</td><td>inspector/RoutingPanel.tsx</td><td>Start/end точки, класс судна, confidence penalty, отображение маршрутов</td></tr>
+  <tr><td>Vessel Panel</td><td>inspector/VesselPanel.tsx</td><td>Справочник судов: Arc4-Arc9, скорость, ледовый допуск</td></tr>
+  <tr><td>Layer Info Panel</td><td>inspector/LayerInfoPanel.tsx</td><td>Summary (coverage, confidence, restored area), манифест, доступные views</td></tr>
+  <tr><td>Vizard Store</td><td>store/vizard-store.ts</td><td>Zustand: enabledLayers, selectedLayer, AI job, vessel, inspector mode, route, timeline</td></tr>
+  <tr><td>API Client</td><td>lib/api-client.ts</td><td>HTTP-клиент: listScenes, createJob, getManifest/Summary, solveRoute</td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<!-- 5. ML COMPONENTS -->
+<h1>5. ML Pipeline — Component View</h1>
+<div class="section-desc">
+  ML Pipeline состоит из 11 компонентов: Temporal U-Net (архитектура нейросети),
+  TemporalUNetPredictor (тайловый инференс), SceneTemporalDataset (PyTorch Dataset),
+  train_mvp, train_full, train_common (обучение), infer (разовый инференс),
+  benchmark, metrics (оценка качества), data_audit (аудит датасета).
+</div>
+
+<div class="diagram">
+  <img src="png/mlComponents.png" alt="ML Component View">
+</div>
+
+<table>
+  <tr><th>Компонент</th><th>Файл</th><th>Описание</th></tr>
+  <tr><td>Temporal U-Net</td><td>ml/model.py</td><td>Encoder(3 уровня) + MultiScaleBottleneck(dilation 1/2/3) + Decoder + class_head + conf_head; SE-блоки, GroupNorm</td></tr>
+  <tr><td>TemporalUNetPredictor</td><td>ml/predictor.py</td><td>Тайловый инференс: нарезка с overlap, сборка, входные каналы (observed + history + gap + sin/cos month)</td></tr>
+  <tr><td>SceneTemporalDataset</td><td>ml/dataset.py</td><td>Gap-focused crop, synthetic gap masking, temporal history, seasonal encoding, LRU cache</td></tr>
+  <tr><td>train_mvp</td><td>ml/train_mvp.py</td><td>MVP обучение: crop=256, batch=1, grad_accum=4, ch=16, group norm</td></tr>
+  <tr><td>train_full</td><td>ml/train_full.py</td><td>Полное обучение на всём датасете</td></tr>
+  <tr><td>train_common</td><td>ml/train_common.py</td><td>Общие утилиты: цикл, валидация, checkpoint, masked-area метрики</td></tr>
+  <tr><td>infer</td><td>ml/infer.py</td><td>Разовый инференс одной сцены</td></tr>
+  <tr><td>benchmark</td><td>ml/benchmark.py</td><td>Masked-area accuracy, IoU, F1, YOLO comparison</td></tr>
+  <tr><td>metrics</td><td>ml/metrics.py</td><td>Pixel accuracy, per-class IoU, masked-area F1, confidence calibration</td></tr>
+  <tr><td>data_audit</td><td>ml/data_audit.py</td><td>Аудит: naming, geometry, gap distribution, class histogram</td></tr>
+</table>
+
+<h3>Temporal U-Net — архитектура</h3>
+<ul>
+  <li><b>Входные каналы</b>: observed(1) + history(1-5) + gap_mask(1) + sin_month(1) + cos_month(1) = 4..9</li>
+  <li><b>Encoder</b>: 3 уровня ResidualConvBlock (base_ch → 2x → 4x → 8x) с MaxPool2d</li>
+  <li><b>Bottleneck</b>: MultiScaleBottleneck — 3 параллельных dilation (1,2,3) + fuse + Dropout2d(0.15)</li>
+  <li><b>Decoder</b>: 3 уровня ConvTranspose2d + skip connections + ResidualConvBlock</li>
+  <li><b>Головы</b>: class_head (logits, K классов) + conf_head (sigmoid, 0..1)</li>
+  <li><b>SE-блоки</b>: Squeeze-and-Excitation (reduction=8) на каждом ResidualConvBlock</li>
+  <li><b>Нормализация</b>: GroupNorm (для 8GB VRAM) или BatchNorm2d</li>
+  <li><b>Инференс</b>: тайловый (512x512, overlap=64/128), autocrop valid region, model caching</li>
+</ul>
+
+<div class="page-break"></div>
+
+<!-- 6. RECONSTRUCTION FLOW -->
+<h1>6. Reconstruction Flow</h1>
+<div class="section-desc">
+  Процесс AI-реконструкции ледовых пропусков: пользователь выбирает сцену → Frontend отправляет
+  POST запрос → Backend создаёт джоб → JobManager запускает Reconstruction Engine →
+  читает IceClass + Composite → определяет gap-маску → получает исторические сцены →
+  U-Net prediction на GPU → генерирует PNG, NPZ, manifest, summary → сохраняет в Storage →
+  обновляет статус джобы → Frontend опрашивает статус и получает манифест.
+</div>
+
+<div class="diagram">
+  <img src="png/reconstructionFlow.png" alt="Reconstruction Flow">
+</div>
+
+<h3>Режимы реконструкции</h3>
+<table>
+  <tr><th>Режим</th><th>Модель</th><th>Overlap</th><th>Описание</th></tr>
+  <tr><td>fast</td><td>Нет (temporal fill)</td><td>—</td><td>Заполнение из исторических сцен + global mode для остатков; confidence 0.55-0.9</td></tr>
+  <tr><td>balanced</td><td>Temporal U-Net</td><td>tile_overlap // 2</td><td>Тайловый инференс с умеренным overlap; fallback на temporal fill если модель недоступна</td></tr>
+  <tr><td>precise</td><td>Temporal U-Net</td><td>полный tile_overlap</td><td>Тайловый инференс с максимальным overlap для лучшего качества</td></tr>
+</table>
+
+<h3>Артефакты слоя (storage/layers/{uuid}/)</h3>
+<table>
+  <tr><th>Файл</th><th>Описание</th></tr>
+  <tr><td>observed.png</td><td>RGBA: исходная IceClass карта с полупрозрачными gap-областями</td></tr>
+  <tr><td>reconstructed.png</td><td>RGBA: восстановленная IceClass карта с подсвеченными gap-областями</td></tr>
+  <tr><td>confidence.png</td><td>RGBA: confidence map (красный→жёлтый→зелёный), полупрозрачные observed области</td></tr>
+  <tr><td>difference.png</td><td>RGBA: diff между observed и reconstructed (красный + фиолетовый)</td></tr>
+  <tr><td>route_grid.npz</td><td>NumPy: classes (uint8), confidence (float32), bounds (float64) — downscaled для A*</td></tr>
+  <tr><td>manifest.json</td><td>layer_id, scene_id, bounds, coordinates, views[]</td></tr>
+  <tr><td>summary.json</td><td>coverage_before/after, restored_area_km2, mean/high/low_confidence, changed_pixels_ratio</td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<!-- 7. ROUTE PLANNING FLOW -->
+<h1>7. Route Planning Flow</h1>
+<div class="section-desc">
+  Процесс маршрутизации: пользователь задаёт start/end координаты и класс судна →
+  Frontend отправляет POST /api/v1/routes/solve → Backend загружает route_grid.npz из артефактов слоя →
+  строит cost grid из ice class + palette.cost + land_cost →
+  A* поиск оптимального маршрута + 2 альтернативы (через corridor penalty) →
+  возвращает RouteSolveResponse с primary + alternatives (distance, ETA, risk, confidence).
+</div>
+
+<div class="diagram">
+  <img src="png/routePlanningFlow.png" alt="Route Planning Flow">
+</div>
+
+<h3>Классы судов и мультипликаторы стоимости</h3>
+<table>
+  <tr><th>Класс</th><th>Мультипликатор</th><th>Номинальная скорость (км/ч)</th></tr>
+  <tr><td>Arc4</td><td>2.2</td><td>17</td></tr>
+  <tr><td>Arc5</td><td>1.9</td><td>18</td></tr>
+  <tr><td>Arc6</td><td>1.55</td><td>20</td></tr>
+  <tr><td>Arc7</td><td>1.25</td><td>23</td></tr>
+  <tr><td>Arc9</td><td>1.0</td><td>26</td></tr>
+</table>
+
+<h3>A* алгоритм</h3>
+<ul>
+  <li>Cost grid = ice_class_cost (из palette) + land_cost (из NPZ) + confidence_penalty * (1 - confidence)</li>
+  <li>Vessel multiplier: Arc4=2.2, Arc9=1.0 — более мощные суда платят меньше за лёд</li>
+  <li>8-connectivity (4 cardinal + 4 diagonal, diagonal weight = sqrt(2))</li>
+  <li>Блокировка клеток с cost >= 8000 (непроходимый лёд/земля)</li>
+  <li>Альтернативные маршруты: corridor_penalty (radius=5+i, factor=1.55+0.15i) на primary path</li>
+  <li>Downsampling: оригинальный raster → 512x512 для скорости A*</li>
+</ul>
+
+<div class="page-break"></div>
+
+<!-- 8. API CONTRACT -->
+<h1>8. API Contract</h1>
+<div class="section-desc">
+  Backend API доступен на http://127.0.0.1:8000 с префиксом /api/v1. CORS разрешён для localhost:8080 и localhost:5173.
+</div>
+
+<table>
+  <tr><th>Метод</th><th>Endpoint</th><th>Описание</th></tr>
+  <tr><td>GET</td><td>/</td><td>Информация о сервисе</td></tr>
+  <tr><td>GET</td><td>/health</td><td>Health check + количество сцен</td></tr>
+  <tr><td>GET</td><td>/api/v1/scenes</td><td>Список сцен Sentinel-1 (limit, offset)</td></tr>
+  <tr><td>POST</td><td>/api/v1/reconstruction/jobs</td><td>Создать джобу реконструкции (scene_id, history_steps, model_mode, aoi_bbox)</td></tr>
+  <tr><td>GET</td><td>/api/v1/reconstruction/jobs/{job_id}</td><td>Статус джобы (status, progress, layer_id, error)</td></tr>
+  <tr><td>GET</td><td>/api/v1/layers/recent</td><td>Список недавних слоёв (limit, offset)</td></tr>
+  <tr><td>GET</td><td>/api/v1/layers/{layer_id}/manifest</td><td>Манифест слоя (bounds, coordinates, views[])</td></tr>
+  <tr><td>GET</td><td>/api/v1/layers/{layer_id}/summary</td><td>Summary: coverage, confidence, restored_area_km2</td></tr>
+  <tr><td>GET</td><td>/api/v1/layers/{layer_id}/{view}.png</td><td>Изображение слоя (observed, reconstructed, confidence, difference)</td></tr>
+  <tr><td>POST</td><td>/api/v1/routes/solve</td><td>Проложить маршрут (layer_id, start/end lon/lat, vessel_class, confidence_penalty)</td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<!-- 9. TECH STACK -->
+<h1>9. Технологический стек</h1>
+
+<h3>Backend</h3>
+<table>
+  <tr><th>Технология</th><th>Версия</th><th>Назначение</th></tr>
+  <tr><td>Python</td><td>3.11/3.14</td><td>Основной язык</td></tr>
+  <tr><td>FastAPI</td><td>—</td><td>REST API framework</td></tr>
+  <tr><td>Uvicorn</td><td>—</td><td>ASGI сервер</td></tr>
+  <tr><td>Pydantic v2</td><td>—</td><td>Валидация и сериализация</td></tr>
+  <tr><td>SQLite (WAL)</td><td>—</td><td>Метаданные (jobs, layers)</td></tr>
+  <tr><td>NumPy</td><td>—</td><td>Матричные операции, A* grid</td></tr>
+  <tr><td>OpenCV (cv2)</td><td>—</td><td>Чтение/запись TIFF/PNG, resize</td></tr>
+  <tr><td>tifffile</td><td>—</td><td>Чтение GeoTIFF метаданных и растров</td></tr>
+</table>
+
+<h3>Frontend</h3>
+<table>
+  <tr><th>Технология</th><th>Назначение</th></tr>
+  <tr><td>React 18</td><td>UI framework</td></tr>
+  <tr><td>TypeScript</td><td>Типизация</td></tr>
+  <tr><td>Vite</td><td>Сборка и dev-сервер</td></tr>
+  <tr><td>MapLibre GL</td><td>Картографическая визуализация</td></tr>
+  <tr><td>Zustand</td><td>Глобальное состояние</td></tr>
+  <tr><td>TailwindCSS</td><td>Стилизация</td></tr>
+  <tr><td>Radix UI</td><td>Headless UI компоненты</td></tr>
+  <tr><td>Recharts</td><td>Графики маршрутов</td></tr>
+  <tr><td>react-hook-form + zod</td><td>Формы и валидация</td></tr>
+</table>
+
+<h3>ML</h3>
+<table>
+  <tr><th>Технология</th><th>Назначение</th></tr>
+  <tr><td>PyTorch</td><td>Фреймворк глубокого обучения</td></tr>
+  <tr><td>CUDA (RTX 2060 SUPER)</td><td>GPU инференс и обучение</td></tr>
+  <tr><td>Temporal U-Net</td><td>Кастомная архитектура (encoder-bottleneck-decoder + dual head)</td></tr>
+</table>
+
+<div class="page-break"></div>
+
+<!-- 10. INFRASTRUCTURE -->
+<h1>10. Инфраструктура и деплой</h1>
+
+<h3>Удалённый хост (Windows)</h3>
+<table>
+  <tr><th>Параметр</th><th>Значение</th></tr>
+  <tr><td>Хост</td><td>10.78.211.199</td></tr>
+  <tr><td>ОС</td><td>Windows 10/11</td></tr>
+  <tr><td>GPU</td><td>NVIDIA RTX 2060 SUPER 8GB</td></tr>
+  <tr><td>SSH</td><td>ssh -i ~/.ssh/id_ed25520 maksi@10.78.211.199</td></tr>
+  <tr><td>Данные IceClass</td><td>C:\Users\maksi\Downloads\vizard_iceclass\Dataset_2025_IceClass</td></tr>
+  <tr><td>Данные Composite</td><td>C:\Users\maksi\Downloads\vizard_composite\Dataset_2025_composite</td></tr>
+  <tr><td>Проект</td><td>C:\Users\maksi\projects\vizard-arctic</td></tr>
+</table>
+
+<h3>Env Variables</h3>
+<table>
+  <tr><th>Переменная</th><th>По умолчанию</th><th>Описание</th></tr>
+  <tr><td>VIZARD_ICECLASS_DIR</td><td>C:\Users\maksi\Downloads\vizard_iceclass\Dataset_2025_IceClass</td><td>Папка с IceClass GeoTIFF</td></tr>
+  <tr><td>VIZARD_COMPOSITE_DIR</td><td>C:\Users\maksi\Downloads\vizard_composite\Dataset_2025_composite</td><td>Папка с Composite GeoTIFF</td></tr>
+  <tr><td>VIZARD_STORAGE_DIR</td><td>{project}/storage</td><td>Директория артефактов</td></tr>
+  <tr><td>VIZARD_SQLITE_PATH</td><td>{storage}/metadata.db</td><td>Путь к SQLite БД</td></tr>
+  <tr><td>VIZARD_MODEL_CKPT</td><td>{backend}/checkpoints/mvp_unet.pt</td><td>Checkpoint модели</td></tr>
+  <tr><td>VIZARD_MODEL_DEVICE</td><td>cuda</td><td>Устройство инференса (cuda/cpu)</td></tr>
+  <tr><td>VIZARD_MODEL_INPUT_SIZE</td><td>512</td><td>Размер тайла</td></tr>
+  <tr><td>VIZARD_MODEL_TILE_OVERLAP</td><td>64</td><td>Overlap тайлов</td></tr>
+  <tr><td>VIZARD_PREVIEW_MAX_WIDTH</td><td>2048</td><td>Макс. ширина preview PNG</td></tr>
+  <tr><td>VIZARD_ROUTE_GRID_SIZE</td><td>512</td><td>Размер grid для A*</td></tr>
+  <tr><td>VIZARD_CORS_ORIGINS</td><td>localhost:8080,localhost:5173</td><td>CORS origins</td></tr>
+  <tr><td>VITE_API_BASE_URL</td><td>http://127.0.0.1:8000</td><td>URL Backend для Frontend</td></tr>
+</table>
+
+<h3>Команды запуска</h3>
+<table>
+  <tr><th>Компонент</th><th>Команда</th></tr>
+  <tr><td>Backend (Windows)</td><td>cd backend && ..\.venv\Scripts\python.exe run.py</td></tr>
+  <tr><td>Frontend (Windows)</td><td>cd frontend && npm.cmd run dev -- --host 0.0.0.0 --port 8080</td></tr>
+  <tr><td>Frontend (macOS)</td><td>cd frontend && npm run dev -- --host 0.0.0.0 --port 8080</td></tr>
+  <tr><td>C4 Architecture (macOS)</td><td>likec4 start ./vizard-arctic-c4</td></tr>
+</table>
+
+</body>
+</html>

@@ -3,10 +3,11 @@ import { useVizard } from "@/store/vizard-store";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Route, X, AlertTriangle, Clock, Ruler } from "lucide-react";
+import { Route, X, AlertTriangle, Clock, Ruler, Snowflake, Info } from "lucide-react";
 import { StatusChip } from "../StatusChip";
-import { useSolveRouteMutation } from "@/hooks/use-vizard-api";
+import { useLayerManifestQuery, useSolveRouteMutation } from "@/hooks/use-vizard-api";
 import { cn } from "@/lib/utils";
+import { ICE_CLASS_LEGEND } from "@/lib/vizard-data";
 
 const ROUTE_POINTS = [
   { id: "murmansk", name: "Мурманск", lon: 33.08, lat: 68.97 },
@@ -15,32 +16,89 @@ const ROUTE_POINTS = [
   { id: "dikson", name: "Диксон", lon: 80.52, lat: 73.51 },
 ];
 
+function pointInsideBounds(lon: number, lat: number, bounds: [number, number, number, number]): boolean {
+  const [lonMin, latMin, lonMax, latMax] = bounds;
+  return lon >= lonMin && lon <= lonMax && lat >= latMin && lat <= latMax;
+}
+
+function pointFromBounds(bounds: [number, number, number, number], tx: number, ty: number): { lon: number; lat: number } {
+  const [lonMin, latMin, lonMax, latMax] = bounds;
+  return {
+    lon: lonMin + (lonMax - lonMin) * tx,
+    lat: latMin + (latMax - latMin) * ty,
+  };
+}
+
 export function RoutingPanel({ compact }: { compact?: boolean } = {}) {
-  const { routeBuilt, activeLayerId, routeResult, setRouteResult, clearRoute } = useVizard();
+  const {
+    routeBuilt,
+    activeLayerId,
+    routeResult,
+    setRouteResult,
+    clearRoute,
+    enableLayers,
+    disableLayers,
+    setAiView,
+    activeLayerSummary,
+  } = useVizard();
   const solveRouteMutation = useSolveRouteMutation();
+  const manifestQuery = useLayerManifestQuery(activeLayerId);
 
   const [pointA, setPointA] = useState("murmansk");
   const [pointB, setPointB] = useState("sabetta");
   const [vesselClass, setVesselClass] = useState<"Arc4" | "Arc5" | "Arc6" | "Arc7" | "Arc9">("Arc7");
   const [confidencePenalty, setConfidencePenalty] = useState("2.0");
+  const [routingNote, setRoutingNote] = useState<string | null>(null);
 
   const pA = useMemo(() => ROUTE_POINTS.find((p) => p.id === pointA) ?? ROUTE_POINTS[0], [pointA]);
   const pB = useMemo(() => ROUTE_POINTS.find((p) => p.id === pointB) ?? ROUTE_POINTS[1], [pointB]);
 
   async function handleBuildRoute() {
     if (!activeLayerId) return;
+    const bounds = manifestQuery.data?.bounds as [number, number, number, number] | undefined;
+
+    let start = { lon: pA.lon, lat: pA.lat };
+    let end = { lon: pB.lon, lat: pB.lat };
+    let adjusted = false;
+
+    if (bounds) {
+      const autoStart = pointFromBounds(bounds, 0.18, 0.32);
+      const autoEnd = pointFromBounds(bounds, 0.82, 0.68);
+
+      if (!pointInsideBounds(start.lon, start.lat, bounds)) {
+        start = autoStart;
+        adjusted = true;
+      }
+      if (!pointInsideBounds(end.lon, end.lat, bounds)) {
+        end = autoEnd;
+        adjusted = true;
+      }
+
+      if (Math.abs(start.lon - end.lon) < 1e-6 && Math.abs(start.lat - end.lat) < 1e-6) {
+        end = pointFromBounds(bounds, 0.78, 0.22);
+        adjusted = true;
+      }
+    }
 
     const payload = {
       layer_id: activeLayerId,
-      start_lon: pA.lon,
-      start_lat: pA.lat,
-      end_lon: pB.lon,
-      end_lat: pB.lat,
+      start_lon: start.lon,
+      start_lat: start.lat,
+      end_lon: end.lon,
+      end_lat: end.lat,
       vessel_class: vesselClass,
       confidence_penalty: Number(confidencePenalty),
     } as const;
 
     const data = await solveRouteMutation.mutateAsync(payload);
+    setRoutingNote(
+      adjusted
+        ? "Выбранные порты вышли за границы активного слоя. Для корректного расчета точки автоматически смещены внутрь покрытия."
+        : null,
+    );
+    disableLayers(["ai-observed", "ai-confidence", "ai-diff"]);
+    enableLayers(["ai-reconstructed"]);
+    setAiView("reconstruction");
     setRouteResult(data);
   }
 
@@ -50,6 +108,9 @@ export function RoutingPanel({ compact }: { compact?: boolean } = {}) {
 
   const primary = routeResult?.primary;
   const alternatives = routeResult?.alternatives ?? [];
+  const diagnostics = routeResult?.diagnostics;
+  const effectiveMode = activeLayerSummary?.model_mode_effective ?? null;
+  const isFallback = Boolean(effectiveMode && effectiveMode.includes("fallback"));
 
   return (
     <div className="flex flex-col">
@@ -150,9 +211,46 @@ export function RoutingPanel({ compact }: { compact?: boolean } = {}) {
           </div>
         )}
 
+        {routingNote && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-md p-2 flex items-start gap-2 text-xs">
+            <Info className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+            <div className="text-muted-foreground">{routingNote}</div>
+          </div>
+        )}
+
         {routeBuilt && primary && (
           <div className="space-y-2 pt-1">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Результат</div>
+
+            {effectiveMode && (
+              <div className={cn("border rounded-md p-2 text-xs", isFallback ? "bg-amber-500/10 border-amber-500/30" : "bg-emerald-500/10 border-emerald-500/30")}>
+                <div className="text-foreground font-medium">Режим реконструкции: {effectiveMode}</div>
+                <div className="text-muted-foreground mt-0.5">
+                  {isFallback
+                    ? "Слой построен эвристикой (fallback), а не нейросетью. Для демо это важно озвучить."
+                    : "Слой построен моделью без fallback."}
+                </div>
+              </div>
+            )}
+
+            {diagnostics && (
+              <div className="border border-border rounded-md p-2.5 bg-muted/40">
+                <div className="text-xs font-medium text-foreground mb-1.5">Проверка, что маршрут учитывает лед</div>
+                <div className="grid grid-cols-2 gap-1.5 text-xs">
+                  <Metric label="Прямая дистанция" value={`${diagnostics.direct_distance_km.toFixed(0)} км`} />
+                  <Metric label="Базовый shortest" value={`${diagnostics.baseline_distance_km.toFixed(0)} км`} />
+                  <Metric
+                    label="Снижение риска vs shortest"
+                    value={`${diagnostics.risk_reduction_vs_baseline_pct.toFixed(1)}%`}
+                    highlight
+                  />
+                  <Metric
+                    label="Отклонение по длине"
+                    value={`${diagnostics.distance_over_baseline_km >= 0 ? "+" : ""}${diagnostics.distance_over_baseline_km.toFixed(0)} км (${diagnostics.distance_over_baseline_pct >= 0 ? "+" : ""}${diagnostics.distance_over_baseline_pct.toFixed(1)}%)`}
+                  />
+                </div>
+              </div>
+            )}
 
             <RouteCard
               title="Основной"
@@ -185,9 +283,22 @@ export function RoutingPanel({ compact }: { compact?: boolean } = {}) {
               </RouteCard>
             ))}
 
-            <div className="bg-status-forecast/10 border border-status-forecast/30 rounded-md p-2 flex items-start gap-2 text-xs">
-              <AlertTriangle className="h-3.5 w-3.5 text-status-forecast shrink-0 mt-0.5" />
-              <div className="text-foreground font-medium">Маршрут по AI-слою</div>
+            <div className="bg-accent-blue/10 border border-accent-blue/30 rounded-md p-2 flex items-start gap-2 text-xs">
+              <Snowflake className="h-3.5 w-3.5 text-accent-blue shrink-0 mt-0.5" />
+              <div>
+              <div className="text-foreground font-medium">Маршрут по AI-карте льда</div>
+                <div className="text-muted-foreground mt-0.5">
+                  Карта автоматически переключена на слой "Восстановление". Маркеры A/B и линия показывают расчет по предсказанному льду.
+                </div>
+                <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1">
+                  {ICE_CLASS_LEGEND.slice(0, 4).map((c) => (
+                    <span key={c.id} className="flex items-center gap-1">
+                      <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: c.rgb }} />
+                      <span className="text-[9px] text-muted-foreground">{c.name}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -225,6 +336,15 @@ function RouteCard({
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+
+function Metric({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-1.5">
+      <span className="text-muted-foreground">{label}:</span>
+      <span className={cn("font-mono font-medium text-right", highlight ? "text-status-current" : "text-foreground")}>{value}</span>
     </div>
   );
 }

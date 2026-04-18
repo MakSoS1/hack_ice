@@ -49,6 +49,7 @@ export const LAYER_GROUPS: { id: string; label: string; layers: LayerDef[] }[] =
     id: "ai",
     label: "AI",
     layers: [
+      { id: "ai-observed", group: "ai", label: "Наблюдение", status: "current", swatch: "bg-status-current" },
       { id: "ai-gaps", group: "ai", label: "Пропуски данных", status: "nodata", swatch: "bg-status-nodata" },
       { id: "ai-reconstructed", group: "ai", label: "Восстановленная карта", status: "ai", swatch: "bg-status-ai" },
       { id: "ai-confidence", group: "ai", label: "Карта уверенности", status: "ai", swatch: "bg-status-ai" },
@@ -67,11 +68,22 @@ export const LAYER_GROUPS: { id: string; label: string; layers: LayerDef[] }[] =
   },
 ];
 
+export const ICE_CLASS_LEGEND = [
+  { id: 1, name: "Открытая вода", rgb: "rgb(0,100,255)", cost: 1.0 },
+  { id: 2, name: "Нилас", rgb: "rgb(0,34,223)", cost: 1.8 },
+  { id: 3, name: "Молодой лёд", rgb: "rgb(250,0,255)", cost: 2.6 },
+  { id: 4, name: "Тонкий однолетний", rgb: "rgb(0,250,0)", cost: 3.4 },
+  { id: 7, name: "Тающий однолетний", rgb: "rgb(171,243,255)", cost: 3.9 },
+  { id: 5, name: "Средний/толстый однолетний", rgb: "rgb(0,200,200)", cost: 4.8 },
+  { id: 6, name: "Выровненный однолетний", rgb: "rgb(150,150,150)", cost: 5.8 },
+] as const;
+
 export const DEFAULT_ENABLED_LAYERS = new Set<string>([
   "ship-positions",
   "ship-tracks",
   "ice-concentration",
   "tool-grid",
+  "ai-observed",
 ]);
 
 export const VESSELS: Vessel[] = [

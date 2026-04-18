@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 JobStatus = Literal["queued", "running", "completed", "failed"]
 ModelMode = Literal["fast", "balanced", "precise"]
+VesselClass = Literal["Arc4", "Arc5", "Arc6", "Arc7", "Arc9"]
 
 
 class SceneMetadata(BaseModel):
@@ -31,6 +32,7 @@ class ReconstructionJobCreate(BaseModel):
     scene_id: str
     history_steps: int = Field(default=2, ge=1, le=5)
     model_mode: ModelMode = "balanced"
+    force_recompute: bool = False
     aoi_bbox: list[float] | None = Field(default=None, min_length=4, max_length=4)
 
 
@@ -108,13 +110,27 @@ class RoutePath(BaseModel):
     points: list[RoutePoint]
 
 
+class RouteEndpoint(BaseModel):
+    lon: float
+    lat: float
+
+
+class RouteDiagnostics(BaseModel):
+    direct_distance_km: float
+    baseline_distance_km: float
+    baseline_risk_score: float
+    risk_reduction_vs_baseline_pct: float
+    distance_over_baseline_km: float
+    distance_over_baseline_pct: float
+
+
 class RouteSolveRequest(BaseModel):
     layer_id: str
     start_lon: float
     start_lat: float
     end_lon: float
     end_lat: float
-    vessel_class: Literal["Arc4", "Arc5", "Arc6", "Arc7", "Arc9"] = "Arc7"
+    vessel_class: VesselClass = "Arc7"
     confidence_penalty: float = Field(default=2.0, ge=0.0, le=20.0)
 
 
@@ -122,3 +138,8 @@ class RouteSolveResponse(BaseModel):
     layer_id: str
     primary: RoutePath
     alternatives: list[RoutePath]
+    start: RouteEndpoint
+    end: RouteEndpoint
+    vessel_class: VesselClass
+    confidence_penalty: float
+    diagnostics: RouteDiagnostics

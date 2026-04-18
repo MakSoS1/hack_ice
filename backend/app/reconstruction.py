@@ -239,7 +239,8 @@ def run_reconstruction(
     reconstructed_rgb = palette.class_ids_to_rgb(reconstructed_classes)
     confidence_rgb = _confidence_to_rgb(confidence)
 
-    observed_alpha = np.where(gap_mask == 1, 40, 180).astype(np.uint8)
+    # Make missing regions clearly visible in "before AI" mode.
+    observed_alpha = np.where(gap_mask == 1, 0, 190).astype(np.uint8)
     reconstructed_alpha = np.where(gap_mask == 1, 215, 120).astype(np.uint8)
     confidence_alpha = np.where(gap_mask == 1, 190, 90).astype(np.uint8)
     diff_alpha = np.where(difference == 1, 230, 0).astype(np.uint8)

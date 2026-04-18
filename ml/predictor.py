@@ -5,7 +5,12 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from app.palette import IceClassPalette
+try:
+    # Preferred import when project root is on PYTHONPATH.
+    from backend.app.palette import IceClassPalette
+except Exception:  # noqa: BLE001
+    # Compatibility path for environments that expose backend/app as top-level "app".
+    from app.palette import IceClassPalette
 from ml.model import TemporalUNet
 
 

@@ -3,7 +3,7 @@ import { useVizard } from "@/store/vizard-store";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sparkles, BoxSelect, Maximize2, Loader2, AlertTriangle } from "lucide-react";
+import { Sparkles, BoxSelect, Maximize2, Loader2, AlertTriangle, Map, RefreshCw } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import {
@@ -67,6 +67,9 @@ export function AIReconstructionPanel({ compact }: { compact?: boolean } = {}) {
     setAiStatus,
     setActiveLayerSummary,
     resetAi,
+    enableLayers,
+    disableLayers,
+    toggleLayer,
   } = useVizard();
 
   const [historyWindow, setHistoryWindow] = useState("7");
@@ -83,6 +86,13 @@ export function AIReconstructionPanel({ compact }: { compact?: boolean } = {}) {
     const list = scenesQuery.data?.scenes ?? [];
     return [...list].sort((a, b) => (a.acquisition_start < b.acquisition_start ? 1 : -1));
   }, [scenesQuery.data?.scenes]);
+
+  function activateReconstructedLayer(layerId: string) {
+    disableLayers(["ai-observed", "ai-confidence", "ai-diff"]);
+    enableLayers(["ai-reconstructed"]);
+    setAiView("reconstruction");
+    setAiStatus("completed", 1.0, layerId);
+  }
 
   useEffect(() => {
     if (!sceneId && sortedScenes.length > 0) {
@@ -108,6 +118,7 @@ export function AIReconstructionPanel({ compact }: { compact?: boolean } = {}) {
       scene_id: sceneId,
       history_steps: HISTORY_MAP[historyWindow] ?? 2,
       model_mode: MODEL_MODE_MAP[modelMode] ?? "balanced",
+      force_recompute: true,
     });
     setAiJob(created.job_id, sceneId);
   }
@@ -122,7 +133,41 @@ export function AIReconstructionPanel({ compact }: { compact?: boolean } = {}) {
         const mode = (l.summary?.model_mode_effective as string | undefined) ?? "";
         return mode === "balanced" || mode === "precise";
       }) ?? pickFrom[0];
-    setAiStatus("completed", 1.0, best.layer_id);
+    activateReconstructedLayer(best.layer_id);
+  }
+
+  function handleLoadMosaic() {
+    const layers = recentLayersQuery.data?.layers ?? [];
+    const mosaic = layers.find((l) => l.scene_id === "mosaic_nsr");
+    if (mosaic) {
+      activateReconstructedLayer(mosaic.layer_id);
+    }
+  }
+
+  async function handleRefreshData() {
+    const refreshed = await recentLayersQuery.refetch();
+    const layers = refreshed.data?.layers ?? recentLayersQuery.data?.layers ?? [];
+    const mosaic = layers.find((l) => l.scene_id === "mosaic_nsr");
+    const best = mosaic ?? layers[0];
+    if (!best) return;
+    activateReconstructedLayer(best.layer_id);
+  }
+
+  const VIEW_TO_LAYER: Record<string, string> = {
+    observation: "ai-observed",
+    reconstruction: "ai-reconstructed",
+    confidence: "ai-confidence",
+    difference: "ai-diff",
+  };
+
+  function handleViewChange(viewId: string) {
+    setAiView(viewId);
+    const layerId = VIEW_TO_LAYER[viewId];
+    if (layerId) {
+      const others = ["ai-observed", "ai-reconstructed", "ai-confidence", "ai-diff"].filter((l) => l !== layerId);
+      disableLayers(others);
+      enableLayers([layerId]);
+    }
   }
 
   const latestJobError = jobQuery.data?.status === "failed" ? jobQuery.data.error : null;
@@ -142,17 +187,34 @@ export function AIReconstructionPanel({ compact }: { compact?: boolean } = {}) {
 
       <div className={cn("space-y-4", compact ? "px-3 py-3" : "px-4 py-4 space-y-5")}>
         {!compact && (
-          <Section title="Выбор области">
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" size="sm" className="gap-2" disabled>
-                <BoxSelect className="h-4 w-4" />
-                Выделить
-              </Button>
-              <Button variant="outline" size="sm" className="gap-2" disabled>
-                <Maximize2 className="h-4 w-4" />
-                По экрану
-              </Button>
-            </div>
+          <div className="bg-accent-blue/10 border border-accent-blue/30 rounded-md p-2.5 text-xs">
+            <div className="text-foreground font-medium">Сценарий записи: до/после</div>
+            <div className="text-muted-foreground mt-0.5">1) Режим “Наблюдение” показывает пустоты, 2) “Заполнить пропуски” запускает реальный AI-прогон (без reuse-кэша), 3) переключаемся в “Восстановление”.</div>
+          </div>
+        )}
+
+        {!compact && (
+          <Section title="Область покрытия">
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full gap-2"
+              onClick={handleLoadMosaic}
+              disabled={!recentLayersQuery.data?.layers?.some((l) => l.scene_id === "mosaic_nsr")}
+            >
+              <Map className="h-4 w-4" />
+              Полная карта СМП
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full gap-2 mt-2"
+              onClick={handleRefreshData}
+              disabled={recentLayersQuery.isFetching}
+            >
+              <RefreshCw className={cn("h-4 w-4", recentLayersQuery.isFetching && "animate-spin")} />
+              {recentLayersQuery.isFetching ? "Обновляем список слоев…" : "Показать последний готовый слой"}
+            </Button>
           </Section>
         )}
 
@@ -260,7 +322,7 @@ export function AIReconstructionPanel({ compact }: { compact?: boolean } = {}) {
             {modes.map((m) => (
               <button
                 key={m.id}
-                onClick={() => setAiView(m.id)}
+                onClick={() => handleViewChange(m.id)}
                 disabled={!aiCompleted && m.id !== "observation"}
                 className={cn(
                   "py-1.5 text-xs rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed",

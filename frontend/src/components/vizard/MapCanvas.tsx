@@ -3,7 +3,7 @@ import maplibregl, { LngLatBoundsLike, Map as MapLibreMap } from "maplibre-gl";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useVizard, VESSELS } from "@/store/vizard-store";
-import { PORTS } from "@/lib/vizard-data";
+import { PORTS, ICE_CLASS_LEGEND } from "@/lib/vizard-data";
 import { Plus, Minus, RotateCcw, Compass } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -168,10 +168,56 @@ function upsertLineLayer(
   }
 }
 
+function upsertPointLayer(
+  map: MapLibreMap,
+  id: string,
+  coordinate: [number, number],
+  color: string,
+  radius = 5,
+) {
+  const sourceId = `route-point-src-${id}`;
+  const layerId = `route-point-layer-${id}`;
+  const data: GeoJSON.Feature<GeoJSON.Point> = {
+    type: "Feature",
+    geometry: { type: "Point", coordinates: coordinate },
+    properties: {},
+  };
+  const source = map.getSource(sourceId) as maplibregl.GeoJSONSource | undefined;
+
+  if (source) {
+    source.setData(data);
+  } else {
+    map.addSource(sourceId, { type: "geojson", data });
+  }
+
+  if (!map.getLayer(layerId)) {
+    map.addLayer({
+      id: layerId,
+      type: "circle",
+      source: sourceId,
+      paint: {
+        "circle-radius": radius,
+        "circle-color": color,
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 1.5,
+      },
+    });
+  } else {
+    map.setPaintProperty(layerId, "circle-color", color);
+    map.setPaintProperty(layerId, "circle-radius", radius);
+  }
+}
+
 function clearMapLibreRoutes(map: MapLibreMap) {
   for (const id of ["primary", "alt_1", "alt_2"]) {
     const lid = `route-layer-${id}`;
     const sid = `route-src-${id}`;
+    if (map.getLayer(lid)) map.removeLayer(lid);
+    if (map.getSource(sid)) map.removeSource(sid);
+  }
+  for (const id of ["start", "end"]) {
+    const lid = `route-point-layer-${id}`;
+    const sid = `route-point-src-${id}`;
     if (map.getLayer(lid)) map.removeLayer(lid);
     if (map.getSource(sid)) map.removeSource(sid);
   }
@@ -270,6 +316,7 @@ export function MapCanvas() {
   const leafletRef = useRef<L.Map | null>(null);
   const leafletOverlaysRef = useRef<Record<string, L.ImageOverlay>>({});
   const leafletRoutesRef = useRef<Record<string, L.Polyline>>({});
+  const leafletRoutePointsRef = useRef<Record<string, L.CircleMarker>>({});
   const hasFittedRef = useRef(false);
 
   const [rendererMode, setRendererMode] = useState<RendererMode>(() => readRendererModeFromStorage());
@@ -278,10 +325,12 @@ export function MapCanvas() {
 
   const manifestQuery = useLayerManifestQuery(activeLayerId);
 
-  const showObserved = aiView === "observation" || !aiCompleted;
-  const showReconstructed = aiCompleted && (aiView === "reconstruction" || enabledLayers.has("ai-reconstructed"));
-  const showConfidence = aiCompleted && (aiView === "confidence" || enabledLayers.has("ai-confidence"));
-  const showDifference = aiCompleted && (aiView === "difference" || enabledLayers.has("ai-diff"));
+  const showObserved = enabledLayers.has("ai-observed");
+  const showGaps = aiCompleted && enabledLayers.has("ai-gaps");
+  const showReconstructed = aiCompleted && enabledLayers.has("ai-reconstructed");
+  const showConfidence = aiCompleted && enabledLayers.has("ai-confidence");
+  const showDifference = aiCompleted && enabledLayers.has("ai-diff");
+  const showIceLegend = showObserved || showReconstructed;
 
   const defaultBounds = useMemo<LngLatBoundsLike>(() => [[20, 66], [130, 82]], []);
   const defaultLeafletBounds = useMemo(() => L.latLngBounds([66, 20], [82, 130]), []);
@@ -311,6 +360,7 @@ export function MapCanvas() {
         leafletRef.current = null;
         leafletOverlaysRef.current = {};
         leafletRoutesRef.current = {};
+        leafletRoutePointsRef.current = {};
       }
 
       if (typeof maplibregl.supported === "function" && !maplibregl.supported({ failIfMajorPerformanceCaveat: true })) {
@@ -528,6 +578,26 @@ export function MapCanvas() {
     }
     portsLayer.addTo(map);
 
+    fetch("/smp_regions.geojson")
+      .then((r) => r.json())
+      .then((geojson) => {
+        const priority = new Set([1, 2, 3, 6, 7, 9, 10]);
+        L.geoJSON(geojson, {
+          style: (feature) => {
+            const r = feature?.properties?.region ?? 0;
+            return {
+              color: priority.has(r) ? "#E67700" : "#868E96",
+              weight: priority.has(r) ? 1.5 : 0.7,
+              opacity: priority.has(r) ? 0.7 : 0.35,
+              fillColor: "transparent",
+              fillOpacity: 0,
+              dashArray: priority.has(r) ? undefined : "3 3",
+            };
+          },
+        }).addTo(map);
+      })
+      .catch(() => {});
+
     map.fitBounds(defaultLeafletBounds, { padding: [20, 20], animate: false });
     setMapError(WEBGL_FALLBACK_MESSAGE);
 
@@ -536,6 +606,7 @@ export function MapCanvas() {
       if (leafletRef.current === map) leafletRef.current = null;
       leafletOverlaysRef.current = {};
       leafletRoutesRef.current = {};
+      leafletRoutePointsRef.current = {};
     };
   }, [rendererMode, cameraMode, defaultBounds, defaultLeafletBounds, selectVessel]);
 
@@ -582,7 +653,7 @@ export function MapCanvas() {
           url: apiImageUrl(byName.difference.url),
           coordinates,
           opacity: byName.difference.opacity,
-          visible: showDifference,
+          visible: showDifference || showGaps,
         });
       }
       if (!hasFittedRef.current) {
@@ -610,7 +681,7 @@ export function MapCanvas() {
       { key: "observed", visible: showObserved },
       { key: "reconstructed", visible: showReconstructed },
       { key: "confidence", visible: showConfidence },
-      { key: "difference", visible: showDifference },
+      { key: "difference", visible: showDifference || showGaps },
     ];
 
     for (const v of desiredViews) {
@@ -644,7 +715,7 @@ export function MapCanvas() {
       map.fitBounds(bounds, { padding: [40, 40], animate: true });
       hasFittedRef.current = true;
     }
-  }, [rendererMode, manifestQuery.data, showObserved, showReconstructed, showConfidence, showDifference]);
+  }, [rendererMode, manifestQuery.data, showObserved, showGaps, showReconstructed, showConfidence, showDifference]);
 
   useEffect(() => {
     if (rendererMode === "maplibre") {
@@ -671,6 +742,12 @@ export function MapCanvas() {
           [2, 1.5],
         );
       }
+      const fallbackStart = routeResult.primary.points[0];
+      const fallbackEnd = routeResult.primary.points[routeResult.primary.points.length - 1];
+      const start = routeResult.start ?? fallbackStart;
+      const end = routeResult.end ?? fallbackEnd;
+      if (start) upsertPointLayer(map, "start", [start.lon, start.lat], "#2F9E44", 5);
+      if (end) upsertPointLayer(map, "end", [end.lon, end.lat], "#E03131", 5);
       return;
     }
 
@@ -682,6 +759,10 @@ export function MapCanvas() {
         if (map.hasLayer(layer)) map.removeLayer(layer);
       }
       leafletRoutesRef.current = {};
+      for (const marker of Object.values(leafletRoutePointsRef.current)) {
+        if (map.hasLayer(marker)) map.removeLayer(marker);
+      }
+      leafletRoutePointsRef.current = {};
     };
 
     if (!routeResult) {
@@ -712,6 +793,30 @@ export function MapCanvas() {
     for (const [idx, alt] of routeResult.alternatives.entries()) {
       upsertLeafletRoute(`alt_${idx + 1}`, alt.points, idx === 0 ? "#2F9E44" : "#E67700", 3.0, "6 4");
     }
+
+    const upsertLeafletPoint = (id: string, lat: number, lon: number, color: string) => {
+      let marker = leafletRoutePointsRef.current[id];
+      if (!marker) {
+        marker = L.circleMarker([lat, lon], {
+          radius: 5,
+          color: "#ffffff",
+          weight: 1.5,
+          fillColor: color,
+          fillOpacity: 1,
+        }).addTo(map);
+        leafletRoutePointsRef.current[id] = marker;
+      } else {
+        marker.setLatLng([lat, lon]);
+        marker.setStyle({ fillColor: color });
+        if (!map.hasLayer(marker)) marker.addTo(map);
+      }
+    };
+    const fallbackStart = routeResult.primary.points[0];
+    const fallbackEnd = routeResult.primary.points[routeResult.primary.points.length - 1];
+    const start = routeResult.start ?? fallbackStart;
+    const end = routeResult.end ?? fallbackEnd;
+    if (start) upsertLeafletPoint("start", start.lat, start.lon, "#2F9E44");
+    if (end) upsertLeafletPoint("end", end.lat, end.lon, "#E03131");
 
     const activeIds = new Set(["primary", ...routeResult.alternatives.map((_, idx) => `alt_${idx + 1}`)]);
     for (const [id, layer] of Object.entries(leafletRoutesRef.current)) {
@@ -768,22 +873,19 @@ export function MapCanvas() {
         )}
 
         <div className="absolute bottom-14 left-3 flex items-end gap-2 pointer-events-none z-10">
-          <div className="bg-card/90 backdrop-blur-sm rounded-lg p-1 flex flex-col items-center shadow-lg border border-border/30 hidden sm:flex">
-            <Compass className="h-3.5 w-3.5 text-primary" />
-            <span className="text-[8px] font-semibold text-foreground mt-0.5">С</span>
-          </div>
-          <div className="bg-card/90 backdrop-blur-sm rounded-lg px-2 py-1 shadow-lg border border-border/30 hidden sm:block">
-            <div className="flex items-end gap-0">
-              <div className="h-2 w-6 border border-foreground bg-foreground" />
-              <div className="h-2 w-6 border border-foreground bg-card" />
-              <div className="h-2 w-6 border border-foreground bg-foreground" />
+          {showIceLegend && (
+            <div className="bg-card/90 backdrop-blur-sm rounded-lg px-2 py-1.5 shadow-lg border border-border/30">
+              <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Ледовые классы</div>
+              <div className="space-y-0.5">
+                {ICE_CLASS_LEGEND.map((c) => (
+                  <div key={c.id} className="flex items-center gap-1.5">
+                    <span className="inline-block h-2.5 w-2.5 rounded-sm border border-border/50 shrink-0" style={{ backgroundColor: c.rgb }} />
+                    <span className="text-[8px] text-foreground leading-tight">{c.name}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="flex justify-between text-[8px] font-mono mt-0.5 text-muted-foreground">
-              <span>0</span>
-              <span>50</span>
-              <span>100 км</span>
-            </div>
-          </div>
+          )}
         </div>
 
         <div className="absolute bottom-14 right-3 flex flex-col gap-1 pointer-events-auto z-10">

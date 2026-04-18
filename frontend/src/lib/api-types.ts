@@ -20,6 +20,7 @@ export interface ReconstructionJobCreate {
   scene_id: string;
   history_steps: number;
   model_mode: ModelMode;
+  force_recompute?: boolean;
   aoi_bbox?: [number, number, number, number] | null;
 }
 
@@ -107,8 +108,27 @@ export interface RoutePath {
   points: RoutePoint[];
 }
 
+export interface RouteEndpoint {
+  lon: number;
+  lat: number;
+}
+
+export interface RouteDiagnostics {
+  direct_distance_km: number;
+  baseline_distance_km: number;
+  baseline_risk_score: number;
+  risk_reduction_vs_baseline_pct: number;
+  distance_over_baseline_km: number;
+  distance_over_baseline_pct: number;
+}
+
 export interface RouteSolveResponse {
   layer_id: string;
   primary: RoutePath;
   alternatives: RoutePath[];
+  start: RouteEndpoint;
+  end: RouteEndpoint;
+  vessel_class: "Arc4" | "Arc5" | "Arc6" | "Arc7" | "Arc9";
+  confidence_penalty: number;
+  diagnostics: RouteDiagnostics;
 }

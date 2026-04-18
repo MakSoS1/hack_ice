@@ -1,0 +1,455 @@
+specification {
+  element actor {
+    style {
+      shape person
+    }
+  }
+  element system
+  element container
+  element component
+}
+
+model {
+  operator = actor 'Оператор арктического мониторинга' {
+    description 'Пользователь, запускающий реконструкцию ледовых пропусков и прокладывающий маршруты судов через Северный морской путь'
+  }
+
+  sentinelData = system 'Sentinel-1 Satellite Data' {
+    description 'Спутниковые данные ESA: IceClass TIFF (классификация льда) + Composite TIFF (композитные изображения с gap-масками)'
+    style {
+      color slate
+    }
+  }
+
+  gpuInfrastructure = system 'GPU Server (RTX 2060 SUPER)' {
+    description 'Удалённый Windows-хост 10.78.211.199 с GPU для инференса и обучения Temporal U-Net'
+    style {
+      color slate
+    }
+  }
+
+  externalMaps = system 'MapLibre GL Tiles' {
+    description 'Картографические тайлы для визуализации арктического региона'
+    style {
+      color slate
+    }
+  }
+
+  vizard = system 'Vizard Arctic' {
+    description 'End-to-end система заполнения ледовых пропусков и маршрутизации судов в Арктике на основе спутниковых данных Sentinel-1'
+    style {
+      color secondary
+    }
+
+    frontend = container 'Frontend SPA' {
+      description 'React + Vite + TailwindCSS + MapLibre GL; картографический интерфейс с инспектором слоёв, AI-панелью и маршрутизацией'
+      technology 'React, TypeScript, Vite, MapLibre GL, Zustand, Radix UI, Recharts'
+      style {
+        color blue
+      }
+
+      vizardShell = component 'VizardShell' {
+        description 'Главный layout: TopBar + LeftSidebar + MapCanvas + RightInspector + FloatingActions/Layers/Search/Timeline'
+        technology 'React, Radix UI'
+        style {
+          color blue
+        }
+      }
+
+      mapCanvas = component 'MapCanvas' {
+        description 'Интерактивная карта MapLibre GL: растровые слои observed/reconstructed/confidence/difference, маршруты, ROI'
+        technology 'MapLibre GL JS'
+        style {
+          color blue
+        }
+      }
+
+      leftSidebar = component 'LeftSidebar' {
+        description 'Панель выбора сцен и временной шкалы: FloatingSearch + FloatingTimeline'
+        technology 'React'
+        style {
+          color blue
+        }
+      }
+
+      rightInspector = component 'RightInspector' {
+        description 'Правая панель инспектора: LayerInfo / AI Reconstruction / Routing / Vessel / Empty'
+        technology 'React, Radix Tabs'
+        style {
+          color blue
+        }
+      }
+
+      aiReconstruction = component 'AI Reconstruction Panel' {
+        description 'Панель AI: запуск джобы реконструкции, наблюдение прогресса, переключение view (observation/reconstruction/confidence/diff)'
+        technology 'React'
+        style {
+          color blue
+        }
+      }
+
+      routingPanel = component 'Routing Panel' {
+        description 'Панель маршрутизации: задание start/end точек, выбор класса судна, confidence penalty, отображение маршрутов'
+        technology 'React, Recharts'
+        style {
+          color blue
+        }
+      }
+
+      vesselPanel = component 'Vessel Panel' {
+        description 'Справочник судов: классы Arc4-Arc9, скорость, ледовый допуск'
+        technology 'React'
+        style {
+          color blue
+        }
+      }
+
+      layerInfoPanel = component 'Layer Info Panel' {
+        description 'Информация о слое: summary (coverage, confidence, restored area), манифест, доступные views'
+        technology 'React'
+        style {
+          color blue
+        }
+      }
+
+      vizardStore = component 'Vizard Store (Zustand)' {
+        description 'Глобальное состояние: выбранный слой, AI-джоба, vessel, inspector mode, route, timeline, enabled layers'
+        technology 'Zustand'
+        style {
+          shape queue
+          color blue
+        }
+      }
+
+      apiClient = component 'API Client' {
+        description 'HTTP-клиент к Backend: listScenes, createReconstructionJob, getLayerManifest/Summary, solveRoute'
+        technology 'fetch, TypeScript'
+        style {
+          color blue
+        }
+      }
+    }
+
+    backend = container 'Backend API' {
+      description 'FastAPI REST-сервис: управление сценами, джобы реконструкции, публикация слоёв, A* маршрутизация'
+      technology 'Python, FastAPI, Uvicorn, SQLite WAL, ThreadPoolExecutor'
+      style {
+        color green
+      }
+
+      fastapiApp = component 'FastAPI App' {
+        description 'Корневое приложение: CORS, маршруты, AppState, обработчики запросов'
+        technology 'FastAPI, Pydantic'
+        style {
+          shape queue
+          color green
+        }
+      }
+
+      sceneIndex = component 'SceneIndex' {
+        description 'Индекс сцен Sentinel-1: парсинг имён, чтение GeoTIFF, gap-маски, исторические сцены, гео-координаты'
+        technology 'tifffile, NumPy, cv2'
+        style {
+          shape cylinder
+          color green
+        }
+      }
+
+      jobManager = component 'JobManager' {
+        description 'Очередь реконструкции: ThreadPoolExecutor, кэширование слоёв по params_hash, прогресс-обновления'
+        technology 'concurrent.futures'
+        style {
+          shape queue
+          color green
+        }
+      }
+
+      reconstruction = component 'Reconstruction Engine' {
+        description 'Ядро реконструкции: чтение IceClass RGB, генерация gap-маски, temporal fill, U-Net prediction, PNG-экспорт, route_grid'
+        technology 'NumPy, cv2, ml.predictor'
+        style {
+          color green
+        }
+      }
+
+      routeSolver = component 'Route Solver (A*)' {
+        description 'A* маршрутизация по cost-grid: ice class cost + vessel multiplier + confidence penalty, альтернативные маршруты через corridor penalty'
+        technology 'NumPy, heapq'
+        style {
+          color green
+        }
+      }
+
+      metadataDb = component 'MetadataDB' {
+        description 'SQLite WAL: таблицы jobs и layers, thread-safe доступ, upsert с dedup'
+        technology 'sqlite3'
+        style {
+          shape cylinder
+          color green
+        }
+      }
+
+      palette = component 'IceClass Palette' {
+        description 'Цветовая палитра ледовых классов: RGB <-> class_id маппинг, cost grid для маршрутизации, tolerance nearest matching'
+        technology 'JSON, NumPy'
+        style {
+          color green
+        }
+      }
+
+      aoiMask = component 'AOI Mask Provider' {
+        description 'Растровка GeoJSON/Shapefile полигонов (Россия, навигация) в бинарные маски для области интереса'
+        technology 'cv2, shapefile'
+        style {
+          color green
+        }
+      }
+
+      schemas = component 'Pydantic Schemas' {
+        description 'API типы: SceneMetadata, ReconstructionJob*, LayerManifest*, RouteSolve*, LayerSummary*'
+        technology 'Pydantic v2'
+        style {
+          color green
+        }
+      }
+
+      settings = component 'Settings' {
+        description 'Конфигурация через env vars: пути к данным, размер модели, CORS origins, preview/grid параметры'
+        technology 'os.getenv, dataclass'
+        style {
+          color green
+        }
+      }
+    }
+
+    ml = container 'ML Pipeline' {
+      description 'Temporal U-Net: обучение, тайловый инференс, бенчмарк. Поддержка режимов fast/balanced/precise'
+      technology 'PyTorch, OpenCV, tifffile, NumPy'
+      style {
+        color indigo
+      }
+
+      temporalUNet = component 'Temporal U-Net' {
+        description 'Архитектура нейросети: encoder(3 уровня) + MultiScaleBottleneck(dilation 1/2/3) + decoder + class_head + conf_head; SE-блоки, GroupNorm для 8GB VRAM'
+        technology 'PyTorch nn.Module'
+        style {
+          color indigo
+        }
+      }
+
+      predictor = component 'TemporalUNetPredictor' {
+        description 'Тайловый инференс: нарезка на тайлы с overlap, сборка предсказаний, входные каналы (observed + history + gap_mask + sin/cos month)'
+        technology 'PyTorch, NumPy'
+        style {
+          color indigo
+        }
+      }
+
+      dataset = component 'SceneTemporalDataset' {
+        description 'PyTorch Dataset: gap-focused crop, synthetic gap masking, temporal history, seasonal encoding, LRU cache class/gap maps'
+        technology 'PyTorch, cv2, NumPy'
+        style {
+          color indigo
+        }
+      }
+
+      trainMvp = component 'train_mvp' {
+        description 'MVP обучение: crop_size=256, batch=1, grad_accum=4, base_channels=16, group norm, synthetic gap eval'
+        technology 'PyTorch, Python CLI'
+        style {
+          color indigo
+        }
+      }
+
+      trainFull = component 'train_full' {
+        description 'Полное обучение на всём датасете с расширенными параметрами'
+        technology 'PyTorch, Python CLI'
+        style {
+          color indigo
+        }
+      }
+
+      trainCommon = component 'train_common' {
+        description 'Общие утилиты обучения: цикл, валидация, checkpoint сохранение, masked-area метрики'
+        technology 'PyTorch'
+        style {
+          color indigo
+        }
+      }
+
+      infer = component 'infer' {
+        description 'Разовый инференс одной сцены: tile-size, tile-overlap, выходной класс и confidence'
+        technology 'Python CLI'
+        style {
+          color indigo
+        }
+      }
+
+      benchmark = component 'benchmark' {
+        description 'Бенчмарк: masked-area accuracy, IoU, F1, опциональное сравнение с YOLO предсказаниями'
+        technology 'NumPy, Python CLI'
+        style {
+          color indigo
+        }
+      }
+
+      metrics = component 'metrics' {
+        description 'Метрики качества: pixel accuracy, per-class IoU, masked-area F1, confidence calibration'
+        technology 'NumPy'
+        style {
+          color indigo
+        }
+      }
+
+      dataAudit = component 'data_audit' {
+        description 'Аудит датасета: naming, geometry, gap distribution, class histogram'
+        technology 'Python CLI'
+        style {
+          color indigo
+        }
+      }
+    }
+
+    storage = container 'Storage & Config' {
+      description 'SQLite metadata.db + файловые артефакты слоёв (PNG, NPZ, manifest.json), ice_palette.json, checkpoint модели'
+      technology 'SQLite WAL, JSON, NPZ, PNG'
+      style {
+        color slate
+      }
+    }
+  }
+
+  // Cross-boundary relationships
+  operator -> vizard 'Запускает реконструкцию, прокладывает маршруты, просматривает слои'
+  vizard -> sentinelData 'Читает IceClass и Composite GeoTIFF'
+  vizard -> gpuInfrastructure 'Запускает U-Net инференс на CUDA'
+  vizard -> externalMaps 'Рендерит карту и наложенные слои'
+
+  // Internal relationships
+  operator -> vizard.frontend 'HTTP :8080'
+  vizard.frontend -> vizard.backend 'REST /api/v1'
+  vizard.backend -> vizard.ml 'submit_reconstruction()'
+  vizard.backend -> vizard.storage 'CRUD jobs/layers'
+  vizard.ml -> vizard.storage 'Запись слоя (PNG, NPZ, manifest)'
+  vizard.ml -> gpuInfrastructure 'CUDA инференс'
+  vizard.backend -> sentinelData 'Чтение GeoTIFF'
+  vizard.frontend -> externalMaps 'MapLibre GL tiles'
+
+  // Backend internal
+  vizard.backend.fastapiApp -> vizard.backend.sceneIndex 'list/get/get_history'
+  vizard.backend.fastapiApp -> vizard.backend.jobManager 'submit/get_job'
+  vizard.backend.fastapiApp -> vizard.backend.routeSolver 'solve_astar'
+  vizard.backend.fastapiApp -> vizard.backend.metadataDb 'CRUD jobs & layers'
+  vizard.backend.fastapiApp -> vizard.backend.palette 'rgb_to_class / cost_grid'
+  vizard.backend.fastapiApp -> vizard.backend.schemas 'request/response models'
+  vizard.backend.fastapiApp -> vizard.backend.settings 'get_settings()'
+  vizard.backend.jobManager -> vizard.backend.reconstruction 'run_reconstruction()'
+  vizard.backend.jobManager -> vizard.backend.metadataDb 'create/update/get_job, upsert_layer'
+  vizard.backend.reconstruction -> vizard.backend.sceneIndex 'get record + gap_mask + history'
+  vizard.backend.reconstruction -> vizard.backend.palette 'rgb_to_class_ids, class_ids_to_rgb'
+  vizard.backend.reconstruction -> vizard.backend.routeSolver 'downsample_grid, haversine_km'
+  vizard.backend.sceneIndex -> vizard.backend.aoiMask 'read_aoi_mask'
+
+  // Frontend internal
+  vizard.frontend.vizardShell -> vizard.frontend.mapCanvas 'рендерит слои и маршруты'
+  vizard.frontend.vizardShell -> vizard.frontend.leftSidebar 'сцены и таймлайн'
+  vizard.frontend.vizardShell -> vizard.frontend.rightInspector 'инспектор контекста'
+  vizard.frontend.rightInspector -> vizard.frontend.aiReconstruction 'AI reconstruction tab'
+  vizard.frontend.rightInspector -> vizard.frontend.routingPanel 'routing tab'
+  vizard.frontend.rightInspector -> vizard.frontend.vesselPanel 'vessel tab'
+  vizard.frontend.rightInspector -> vizard.frontend.layerInfoPanel 'layer info tab'
+  vizard.frontend.aiReconstruction -> vizard.frontend.apiClient 'createJob, pollStatus'
+  vizard.frontend.routingPanel -> vizard.frontend.apiClient 'solveRoute'
+  vizard.frontend.layerInfoPanel -> vizard.frontend.apiClient 'getManifest, getSummary'
+  vizard.frontend.leftSidebar -> vizard.frontend.apiClient 'listScenes, listRecentLayers'
+  vizard.frontend.mapCanvas -> vizard.frontend.vizardStore 'enabledLayers, route, timeline'
+  vizard.frontend.rightInspector -> vizard.frontend.vizardStore 'inspectorMode, selectedVessel'
+  vizard.frontend.apiClient -> vizard.backend 'REST /api/v1'
+
+  // ML internal
+  vizard.ml.trainMvp -> vizard.ml.trainCommon 'training loop'
+  vizard.ml.trainFull -> vizard.ml.trainCommon 'training loop'
+  vizard.ml.trainCommon -> vizard.ml.dataset 'DataLoader'
+  vizard.ml.trainCommon -> vizard.ml.temporalUNet 'model forward/backward'
+  vizard.ml.trainCommon -> vizard.ml.metrics 'validation metrics'
+  vizard.ml.predictor -> vizard.ml.temporalUNet 'model.eval() inference'
+  vizard.ml.infer -> vizard.ml.predictor 'predict single scene'
+  vizard.ml.benchmark -> vizard.ml.predictor 'batch inference'
+  vizard.ml.benchmark -> vizard.ml.metrics 'compute metrics'
+  vizard.ml.dataAudit -> vizard.ml.dataset 'scan scenes'
+}
+
+views {
+  view context {
+    title 'Vizard Arctic — System Context'
+    description 'Общий контекст системы: пользователь, спутниковые данные, GPU-сервер, картографические тайлы'
+
+    include
+      operator,
+      vizard,
+      sentinelData,
+      gpuInfrastructure,
+      externalMaps
+  }
+
+  view container of vizard {
+    title 'Vizard Arctic — Container View'
+    description 'Контейнеры внутри системы Vizard Arctic: Frontend, Backend API, ML Pipeline, Storage & Config'
+
+    include
+      operator,
+      vizard.frontend,
+      vizard.backend,
+      vizard.ml,
+      vizard.storage,
+      sentinelData,
+      gpuInfrastructure,
+      externalMaps
+  }
+
+  view backendComponents of vizard.backend {
+    title 'Backend API — Component View'
+    description 'Внутренние компоненты Backend API: FastAPI App, SceneIndex, JobManager, Reconstruction, RouteSolver, MetadataDB, Palette, AOI Mask'
+
+    include
+      vizard.backend.*
+  }
+
+  view frontendComponents of vizard.frontend {
+    title 'Frontend SPA — Component View'
+    description 'Внутренние компоненты Frontend: VizardShell, MapCanvas, Sidebar, Inspector panels, Store, API Client'
+
+    include
+      vizard.frontend.*
+  }
+
+  view mlComponents of vizard.ml {
+    title 'ML Pipeline — Component View'
+    description 'Внутренние компоненты ML Pipeline: Temporal U-Net, Predictor, Dataset, Training, Benchmark, Metrics'
+
+    include
+      vizard.ml.*
+  }
+
+  view reconstructionFlow {
+    title 'Reconstruction Flow — Dynamic View'
+    description 'Последовательность действий при запуске AI-реконструкции ледовых пропусков'
+
+    include
+      vizard.frontend,
+      vizard.backend,
+      vizard.ml,
+      vizard.storage,
+      gpuInfrastructure
+  }
+
+  view routePlanningFlow {
+    title 'Route Planning Flow — Dynamic View'
+    description 'Последовательность действий при прокладке маршрута судна'
+
+    include
+      vizard.frontend,
+      vizard.backend,
+      vizard.storage
+  }
+}

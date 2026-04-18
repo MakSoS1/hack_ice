@@ -10,7 +10,7 @@ import {
   SceneListResponse,
 } from "@/lib/api-types";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://127.0.0.1:8000";
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 const API_PREFIX = "/api/v1";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {

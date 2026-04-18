@@ -74,7 +74,13 @@ def _reconstruct(came_from: dict[tuple[int, int], tuple[int, int]], current: tup
     return path
 
 
-def _route_stats(path: list[tuple[int, int]], bounds: list[float], shape_hw: tuple[int, int], cost_grid: np.ndarray, confidence_grid: np.ndarray) -> tuple[float, float, float]:
+def route_stats_for_path(
+    path: list[tuple[int, int]],
+    bounds: list[float],
+    shape_hw: tuple[int, int],
+    cost_grid: np.ndarray,
+    confidence_grid: np.ndarray,
+) -> tuple[float, float, float]:
     if len(path) < 2:
         return 0.0, 0.0, 0.0
 
@@ -112,6 +118,8 @@ def solve_astar(
     h, w = cost_grid.shape
     start = lonlat_to_cell(start_lon, start_lat, bounds, (h, w))
     goal = lonlat_to_cell(end_lon, end_lat, bounds, (h, w))
+    if start == goal:
+        raise RuntimeError("Start and end points collapse to the same route cell for this layer bounds")
 
     multiplier = VESSEL_MULTIPLIER.get(vessel_class, VESSEL_MULTIPLIER["Arc7"])
     blocked_threshold = 8000.0
@@ -135,7 +143,7 @@ def solve_astar(
             continue
         if current == goal:
             path = _reconstruct(came_from, current)
-            dist_km, risk_score, conf_score = _route_stats(path, bounds, (h, w), cost_grid, confidence_grid)
+            dist_km, risk_score, conf_score = route_stats_for_path(path, bounds, (h, w), cost_grid, confidence_grid)
             return GridRoute(
                 path_cells=path,
                 total_cost=float(g_score[current]),

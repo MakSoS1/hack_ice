@@ -6,6 +6,7 @@ import { FloatingSearch } from "@/components/vizard/FloatingSearch";
 import { FloatingLayers } from "@/components/vizard/FloatingLayers";
 import { FloatingActions } from "@/components/vizard/FloatingActions";
 import { FloatingTimeline } from "@/components/vizard/FloatingTimeline";
+import { FloatingViewModes } from "@/components/vizard/FloatingViewModes";
 import { SlidePanel } from "@/components/vizard/SlidePanel";
 import { useVizard } from "@/store/vizard-store";
 import { InspectorMode } from "@/lib/vizard-types";
@@ -13,7 +14,7 @@ import { useBreakpoint } from "@/hooks/use-mobile";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { LeftSidebar } from "@/components/vizard/LeftSidebar";
-import { listRecentLayers, solveRoute } from "@/lib/api-client";
+import { listRecentLayers } from "@/lib/api-client";
 
 interface VizardShellProps {
   initialMode?: InspectorMode;
@@ -22,7 +23,7 @@ interface VizardShellProps {
 }
 
 export function VizardShell({ initialMode, reportOpen: extOpen, setReportOpen: extSetOpen }: VizardShellProps) {
-  const { setInspectorMode, inspectorMode, activeLayerSummary, aiCompleted, setAiStatus, setRouteResult, activeLayerId } = useVizard();
+  const { setInspectorMode, inspectorMode, setAiStatus, enableLayers, disableLayers, setAiView } = useVizard();
   const autoloadRef = useRef(false);
   const [localOpen, setLocalOpen] = useState(false);
   const open = extOpen ?? localOpen;
@@ -40,15 +41,28 @@ export function VizardShell({ initialMode, reportOpen: extOpen, setReportOpen: e
   useEffect(() => {
     if (autoloadRef.current) return;
     autoloadRef.current = true;
-    listRecentLayers(30, 0)
+    listRecentLayers(50, 0)
       .then((res) => {
         const layers = res.layers ?? [];
-        if (layers.length === 0) return;
-        const best =
-          layers.find((l) => {
-            const mode = (l.summary?.model_mode_effective as string | undefined) ?? "";
-            return mode === "balanced" || mode === "precise";
-          }) ?? layers[0];
+        if (layers.length === 0) {
+          setInspectorMode("ai");
+          setPanelOpen(true);
+          return;
+        }
+
+        const recentWithGaps = layers.find((l) => {
+          const coverageBefore = Number((l.summary as { coverage_before?: number }).coverage_before ?? 1);
+          return coverageBefore < 0.98;
+        });
+        const fallbackBest = layers.find((l) => {
+          const mode = (l.summary?.model_mode_effective as string | undefined) ?? "";
+          return mode === "balanced" || mode === "precise";
+        });
+        const best = recentWithGaps ?? fallbackBest ?? layers[0];
+
+        disableLayers(["ai-reconstructed", "ai-confidence", "ai-diff"]);
+        enableLayers(["ai-observed"]);
+        setAiView("observation");
         setAiStatus("completed", 1.0, best.layer_id);
         setInspectorMode("ai");
         setPanelOpen(true);
@@ -57,28 +71,13 @@ export function VizardShell({ initialMode, reportOpen: extOpen, setReportOpen: e
         setInspectorMode("ai");
         setPanelOpen(true);
       });
-  }, [setAiStatus, setInspectorMode]);
+  }, [disableLayers, enableLayers, setAiStatus, setAiView, setInspectorMode]);
 
   useEffect(() => {
     if (inspectorMode !== "empty") {
       setPanelOpen(true);
     }
   }, [inspectorMode]);
-
-  useEffect(() => {
-    if (!aiCompleted || !activeLayerId) return;
-    solveRoute({
-      layer_id: activeLayerId,
-      start_lon: 50.0,
-      start_lat: 75.0,
-      end_lon: 65.0,
-      end_lat: 76.5,
-      vessel_class: "Arc7",
-      confidence_penalty: 2.0,
-    })
-      .then((r) => setRouteResult(r))
-      .catch(() => {});
-  }, [aiCompleted, activeLayerId, setRouteResult]);
 
   if (isMobile) {
     return (
@@ -94,18 +93,7 @@ export function VizardShell({ initialMode, reportOpen: extOpen, setReportOpen: e
           routeActive={inspectorMode === "route"}
         />
         <FloatingTimeline />
-
-        {aiCompleted && activeLayerSummary && (
-          <div className="absolute top-14 right-3 z-30 pointer-events-auto bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-2.5 min-w-[130px] border border-border/50">
-            <div className="text-[10px] text-muted-foreground mb-0.5">Покрытие</div>
-            <div className="text-xl font-bold text-status-current leading-none">
-              {Math.round(activeLayerSummary.coverage_after * 100)}%
-            </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">
-              +{activeLayerSummary.restored_area_km2.toFixed(0)} км²
-            </div>
-          </div>
-        )}
+        <FloatingViewModes />
 
         <Drawer open={panelOpen} onOpenChange={setPanelOpen}>
           <DrawerContent className="max-h-[70vh]">
@@ -150,21 +138,7 @@ export function VizardShell({ initialMode, reportOpen: extOpen, setReportOpen: e
         routeActive={inspectorMode === "route"}
       />
       <FloatingTimeline />
-
-      {aiCompleted && activeLayerSummary && (
-        <div className="absolute top-[100px] right-3 z-30 pointer-events-auto bg-card/95 backdrop-blur-sm rounded-xl shadow-lg p-3 min-w-[150px] border border-border/50">
-          <div className="text-[10px] text-muted-foreground mb-0.5">AI результат</div>
-          <div className="text-2xl font-bold text-status-current leading-none">
-            {Math.round(activeLayerSummary.coverage_after * 100)}%
-          </div>
-          <div className="text-xs text-muted-foreground mt-1">
-            +{activeLayerSummary.restored_area_km2.toFixed(0)} км² восстановлено
-          </div>
-          <div className="text-xs text-muted-foreground">
-            Уверенность: <span className="text-foreground font-medium">{activeLayerSummary.mean_confidence.toFixed(2)}</span>
-          </div>
-        </div>
-      )}
+      <FloatingViewModes />
 
       {panelOpen && (
         <SlidePanel onClose={() => setPanelOpen(false)}>

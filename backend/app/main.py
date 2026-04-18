@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, Response
 from .db import MetadataDB
 from .jobs import JobManager
 from .palette import IceClassPalette, load_palette
-from .route_solver import GridRoute, cell_to_lonlat, solve_astar
+from .route_solver import GridRoute, cell_to_lonlat, haversine_km, route_stats_for_path, solve_astar
 from .scene_index import SceneIndex
 from .schemas import (
     LayerListItem,
@@ -23,6 +23,8 @@ from .schemas import (
     ReconstructionJobCreate,
     ReconstructionJobCreated,
     ReconstructionJobStatus,
+    RouteDiagnostics,
+    RouteEndpoint,
     RoutePath,
     RoutePoint,
     RouteSolveRequest,
@@ -181,6 +183,7 @@ def create_app() -> FastAPI:
             "scene_id": req.scene_id,
             "history_steps": req.history_steps,
             "model_mode": req.model_mode,
+            "force_recompute": req.force_recompute,
             "aoi_bbox": req.aoi_bbox,
         }
         job_id = st.db.create_job(scene_id=req.scene_id, params=params)
@@ -189,6 +192,7 @@ def create_app() -> FastAPI:
             scene_id=req.scene_id,
             history_steps=req.history_steps,
             model_mode=req.model_mode,
+            force_recompute=req.force_recompute,
             aoi_bbox=req.aoi_bbox,
         )
         return ReconstructionJobCreated(job_id=job_id, status="queued")
@@ -311,6 +315,30 @@ def create_app() -> FastAPI:
         except RuntimeError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
+        baseline_distance_km = primary_route.distance_km
+        baseline_risk_score = primary_route.risk_score
+        try:
+            baseline_route = solve_astar(
+                cost_grid=np.ones_like(cost_grid, dtype=np.float32),
+                confidence_grid=np.ones_like(confidence, dtype=np.float32),
+                bounds=bounds,
+                start_lon=req.start_lon,
+                start_lat=req.start_lat,
+                end_lon=req.end_lon,
+                end_lat=req.end_lat,
+                vessel_class=req.vessel_class,
+                confidence_penalty=0.0,
+            )
+            baseline_distance_km, baseline_risk_score, _ = route_stats_for_path(
+                baseline_route.path_cells,
+                bounds=bounds,
+                shape_hw=cost_grid.shape,
+                cost_grid=cost_grid,
+                confidence_grid=confidence,
+            )
+        except RuntimeError:
+            pass
+
         alt_routes: list[GridRoute] = []
         corridor_paths = [primary_route.path_cells]
         for _ in range(2):
@@ -351,7 +379,36 @@ def create_app() -> FastAPI:
             for i, route in enumerate(alt_routes)
         ]
 
-        return RouteSolveResponse(layer_id=req.layer_id, primary=primary, alternatives=alternatives)
+        direct_distance_km = haversine_km(req.start_lon, req.start_lat, req.end_lon, req.end_lat)
+        risk_reduction_vs_baseline_pct = (
+            max(0.0, (baseline_risk_score - primary_route.risk_score) / baseline_risk_score * 100.0)
+            if baseline_risk_score > 1e-6
+            else 0.0
+        )
+        distance_over_baseline_km = primary_route.distance_km - baseline_distance_km
+        distance_over_baseline_pct = (
+            (distance_over_baseline_km / baseline_distance_km) * 100.0 if baseline_distance_km > 1e-6 else 0.0
+        )
+
+        diagnostics = RouteDiagnostics(
+            direct_distance_km=float(direct_distance_km),
+            baseline_distance_km=float(baseline_distance_km),
+            baseline_risk_score=float(baseline_risk_score),
+            risk_reduction_vs_baseline_pct=float(risk_reduction_vs_baseline_pct),
+            distance_over_baseline_km=float(distance_over_baseline_km),
+            distance_over_baseline_pct=float(distance_over_baseline_pct),
+        )
+
+        return RouteSolveResponse(
+            layer_id=req.layer_id,
+            primary=primary,
+            alternatives=alternatives,
+            start=RouteEndpoint(lon=req.start_lon, lat=req.start_lat),
+            end=RouteEndpoint(lon=req.end_lon, lat=req.end_lat),
+            vessel_class=req.vessel_class,
+            confidence_penalty=req.confidence_penalty,
+            diagnostics=diagnostics,
+        )
 
     return app
 

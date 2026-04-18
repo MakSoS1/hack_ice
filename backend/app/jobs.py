@@ -39,22 +39,45 @@ class JobManager:
         self.model_tile_overlap = model_tile_overlap
         self.executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="recon")
 
-    def submit_reconstruction(self, job_id: str, *, scene_id: str, history_steps: int, model_mode: str, aoi_bbox: list[float] | None) -> None:
+    def submit_reconstruction(
+        self,
+        job_id: str,
+        *,
+        scene_id: str,
+        history_steps: int,
+        model_mode: str,
+        force_recompute: bool,
+        aoi_bbox: list[float] | None,
+    ) -> None:
         self.executor.submit(
             self._run_reconstruction_job,
             job_id,
             scene_id,
             history_steps,
             model_mode,
+            force_recompute,
             aoi_bbox,
         )
 
-    def _run_reconstruction_job(self, job_id: str, scene_id: str, history_steps: int, model_mode: str, aoi_bbox: list[float] | None) -> None:
+    def _run_reconstruction_job(
+        self,
+        job_id: str,
+        scene_id: str,
+        history_steps: int,
+        model_mode: str,
+        force_recompute: bool,
+        aoi_bbox: list[float] | None,
+    ) -> None:
         try:
             self.db.update_job(job_id, status="running", progress=0.05)
 
             phash = params_hash(scene_id, history_steps, model_mode, aoi_bbox)
-            cached = self.db.get_cached_layer(scene_id, phash)
+            cached = None if force_recompute else self.db.get_cached_layer(scene_id, phash)
+            if cached:
+                cached_mode = str((cached.get("summary") or {}).get("model_mode_effective") or "")
+                # Do not reuse stale fallback artifacts for balanced/precise requests.
+                if model_mode in {"balanced", "precise"} and "fallback" in cached_mode:
+                    cached = None
             if cached:
                 self.db.update_job(job_id, status="completed", progress=1.0, layer_id=cached["id"])
                 return

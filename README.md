@@ -1,178 +1,135 @@
 # Vizard Arctic
 
-End-to-end prototype for Arctic ice gap filling and route planning.
+Vizard Arctic — прототип платформы для мониторинга льда в Арктике, AI-восстановления пропусков и прокладки маршрута судна с учетом реконструированной ледовой карты.
 
-## Monorepo structure
+Репозиторий: [MakSoS1/hack_ice](https://github.com/MakSoS1/hack_ice/tree/main)
 
-- `backend/` FastAPI + job queue + scene index + layer publishing + A* routes
-- `frontend/` React + MapLibre UI (full `vizard-arctic-clean` interface)
-- `ml/` temporal U-Net training/inference scripts
-- `configs/` palette and model configs
-- `storage/` runtime artifacts (`layers/`, `metadata.db`)
-- `scripts/` bootstrap helpers for remote Windows machine
+## Что показывает демо
 
-## Remote deployment target
+В интерфейсе реализован сценарий «до/после»:
 
-Designed for:
-- Windows host `10.78.211.199`
-- GPU: RTX 2060 SUPER 8GB
-- Data folders (read-only):
-  - `C:\Users\maksi\Downloads\vizard_iceclass\Dataset_2025_IceClass`
-  - `C:\Users\maksi\Downloads\vizard_composite\Dataset_2025_composite`
+1. **До AI**: видим слой наблюдений (`Наблюдение`) с пустотами данных.
+2. **AI-восстановление**: кнопка `Заполнить пропуски` запускает реальный reconstruction-job (без reuse-кэша в демо-режиме).
+3. **После AI**: переключаемся на `Восстановление` и видим заполненные области.
+4. **Маршрут**: прокладываем путь (например, от Мурманска до Сабетты/Дудинки) с учетом реконструированного льда и диагностик качества маршрута.
 
-## Quick start (Windows remote)
+Если выбранные порты выходят за границы текущего слоя, интерфейс автоматически сдвигает точки внутрь покрытия (и показывает предупреждение), чтобы маршрут строился стабильно.
+
+## Интерфейс
+
+![Vizard UI](docs/screenshots/interface-home.png)
+![Vizard UI Route](docs/screenshots/interface-route.png)
+
+## Архитектура (LikeC4)
+
+Архитектура проекта построена в **LikeC4** и лежит в папке [`vizard-arctic-c4`](vizard-arctic-c4).
+
+- Source model: [`vizard-arctic-c4/vizard-model.c4`](vizard-arctic-c4/vizard-model.c4)
+- Rendered HTML: [`vizard-arctic-c4/vizard-architecture.html`](vizard-arctic-c4/vizard-architecture.html)
+- PDF: [`vizard-arctic-c4/vizard-arctic-architecture.pdf`](vizard-arctic-c4/vizard-arctic-architecture.pdf)
+- PNG-диаграммы:
+  - ![Context](vizard-arctic-c4/png/context.png)
+  - ![Container](vizard-arctic-c4/png/container.png)
+  - ![Backend](vizard-arctic-c4/png/backendComponents.png)
+  - ![Frontend](vizard-arctic-c4/png/frontendComponents.png)
+  - ![ML](vizard-arctic-c4/png/mlComponents.png)
+  - ![Reconstruction flow](vizard-arctic-c4/png/reconstructionFlow.png)
+  - ![Route flow](vizard-arctic-c4/png/routePlanningFlow.png)
+
+## Структура репозитория
+
+- `backend/` — FastAPI, job manager, scene/layer API, route solver.
+- `frontend/` — React + MapLibre UI для демо.
+- `ml/` — инференс/обучение Temporal U-Net.
+- `configs/` — палитра ледовых классов и конфиги.
+- `scripts/` — утилиты запуска и подготовки.
+- `storage/` — runtime-артефакты слоев и metadata DB.
+- `vizard-arctic-c4/` — LikeC4-модель и рендеры архитектуры.
+
+## Быстрый запуск (рекомендованный: backend на Windows ПК, frontend на macOS)
+
+### 1) Запуск backend на удаленном ПК (Windows)
 
 ```powershell
 cd C:\Users\maksi\projects\vizard-arctic
 powershell -ExecutionPolicy Bypass -File .\scripts\setup_remote.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\start_backend_keepalive.ps1
 ```
 
-## Frontend status
+Backend должен стать доступен по `http://10.78.211.199:8000/health`.
 
-`frontend/` now contains the full `vizard-arctic-clean` interface and is the primary UI for this repository.
-
-### Run backend
-
-```powershell
-cd C:\Users\maksi\projects\vizard-arctic\backend
-..\.venv\Scripts\python.exe run.py
-```
-
-### Run frontend
-
-```powershell
-cd C:\Users\maksi\projects\vizard-arctic\frontend
-npm.cmd run dev -- --host 0.0.0.0 --port 8080
-```
-
-Set API URL for frontend with:
-
-```powershell
-setx VITE_API_BASE_URL http://127.0.0.1:8000
-```
-
-### Run frontend on macOS, backend+model on remote PC
-
-On remote Windows PC:
-
-```powershell
-cd C:\Users\maksi\projects\vizard-arctic\backend
-..\.venv\Scripts\python.exe run.py
-```
-
-On local macOS:
+### 2) Запуск frontend на macOS
 
 ```bash
 cd /Users/maksos/Documents/work/hack_ice/_repo_hack_ice/frontend
-cp .env.remote.example .env.local
 npm install
 npm run dev -- --host 0.0.0.0 --port 8080
 ```
 
-Then open `http://localhost:8080`.
+Открыть: `http://localhost:8080`
 
-## API contract
+По умолчанию dev-прокси фронтенда настроен на удаленный backend:
 
-- `GET /` (service info)
+- `frontend/vite.config.ts` -> `proxy /api -> http://10.78.211.199:8000`
+
+## Локальный запуск (все на одной Windows-машине)
+
+```powershell
+cd C:\Users\maksi\projects\vizard-arctic
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_remote.ps1
+
+cd .\backend
+..\.venv\Scripts\python.exe run.py
+
+# в другом окне
+cd C:\Users\maksi\projects\vizard-arctic\frontend
+npm run dev -- --host 0.0.0.0 --port 8080
+```
+
+## Сценарий записи видео (рекомендуемый)
+
+1. Открыть `http://localhost:8080`.
+2. В правой панели `AI-восстановление` оставить режим `Наблюдение` — показать пустоты.
+3. Нажать `Заполнить пропуски` и дождаться завершения job.
+4. Переключиться в `Восстановление`/`Разница` и показать, что область заполнена.
+5. Перейти в `Маршрут`, выбрать точки (`Мурманск -> Сабетта/Дудинка`), нажать `Построить`.
+6. Показать:
+   - основную и альтернативные траектории;
+   - `risk_reduction_vs_baseline_pct`;
+   - `distance_over_baseline_km`;
+   - `model_mode_effective` (balanced/precise vs fallback).
+
+## API
+
+- `GET /health`
 - `GET /api/v1/scenes`
 - `POST /api/v1/reconstruction/jobs`
 - `GET /api/v1/reconstruction/jobs/{job_id}`
 - `GET /api/v1/layers/recent`
 - `GET /api/v1/layers/{layer_id}/manifest`
-- `GET /api/v1/layers/{layer_id}/{view}.png`
 - `GET /api/v1/layers/{layer_id}/summary`
+- `GET /api/v1/layers/{layer_id}/{view}.png`
 - `POST /api/v1/routes/solve`
 
-## ML scripts
+## Режимы модели
 
-### Recommended RTX 2060 SUPER training profile
+`POST /api/v1/reconstruction/jobs` поддерживает:
 
-The training defaults are tuned for 8GB VRAM:
-- `crop_size=256`
-- `batch_size=1`
-- `grad_accum=4`
-- `base_channels=16`
-- `history_steps=1`
-- `norm=group`
-- synthetic gap masking enabled for masked-area validation
+- `fast` — эвристическое восстановление.
+- `balanced` — модельный inference в сбалансированном режиме.
+- `precise` — более точный inference с большим overlap.
 
-Dataset audit (scene naming, geometry, gap distribution, class histogram):
+Для демо фронтенд отправляет `force_recompute=true`, чтобы запуск был реальным, а не мгновенным cache-hit.
 
-```powershell
-cd C:\Users\maksi\projects\vizard-arctic
-.\.venv\Scripts\python.exe -m ml.data_audit
-```
+## Альтернативная реализация (Monte Carlo)
 
-Accuracy-oriented MVP training on representative subset:
+В проекте есть отдельная ветка-реализация на Monte Carlo в другой папке (вне этого репозитория):
 
-```powershell
-cd C:\Users\maksi\projects\vizard-arctic
-.\.venv\Scripts\python.exe -m ml.train_mvp
-```
+- `C:\Users\maksi\projects\vizard-arctic-monte`
 
-Full training pass:
+Эта реализация не удалена и может использоваться для сравнительных экспериментов с текущим подходом.
 
-```powershell
-.\.venv\Scripts\python.exe -m ml.train_full
-```
+## Примечания
 
-Smoke inference for one scene:
-
-```powershell
-.\.venv\Scripts\python.exe -m ml.infer --scene-id <SCENE_ID> --tile-size 512 --tile-overlap 64
-```
-
-Benchmark with masked-area metrics and optional YOLO comparison:
-
-```powershell
-.\.venv\Scripts\python.exe -m ml.benchmark --checkpoint .\backend\checkpoints\mvp_unet.pt --synthetic-eval
-```
-
-If you have previous YOLO predictions (`<scene_id>.npy/.npz/.png`):
-
-```powershell
-.\.venv\Scripts\python.exe -m ml.benchmark --checkpoint .\backend\checkpoints\mvp_unet.pt --yolo-pred-dir <YOLO_PRED_DIR>
-```
-
-## Runtime model modes
-
-`POST /api/v1/reconstruction/jobs` supports:
-- `fast`: temporal fill baseline (no neural net)
-- `balanced`: tiled Temporal U-Net reconstruction with moderate overlap
-- `precise`: tiled Temporal U-Net reconstruction with larger overlap
-
-## Why CPU/GPU can stay under 20%
-
-Main bottleneck is input pipeline:
-- each training sample reads large GeoTIFF rasters from disk (`IceClass` + `Composite`);
-- `Composite` gap masks are expensive to decode repeatedly;
-- with small batch/crop the GPU compute step is short, so it waits for data.
-
-Mitigations included in this repo:
-- LRU cache for class/gap maps in `SceneTemporalDataset` (`--cache-items`, default `24`);
-- tiled inference and low-VRAM defaults (`batch_size=1`, `grad_accum`, `group` norm);
-- CLI controls for `--workers` and `--cache-items`.
-
-Example:
-
-```powershell
-.\.venv\Scripts\python.exe -m ml.train_mvp --workers 2 --cache-items 48
-```
-
-## Demo scenario (ice motion + model impact)
-
-Run:
-
-```powershell
-cd C:\Users\maksi\projects\vizard-arctic
-.\.venv\Scripts\python.exe .\scripts\demo_scenario.py --model-mode balanced
-```
-
-Outputs:
-- `storage/reports/demo_scenario.json`
-- `storage/reports/demo_scenario.md`
-- `storage/reports/demo_ice_motion_*.gif`
-- demo layers are auto-registered in `storage/metadata.db` for UI reuse
-
-UI demo shortcut:
-- in AI panel click `Загрузить готовый демо-слой` to open latest precomputed layer without waiting for a full run.
+- Если backend недоступен с macOS, проверьте firewall-правило на порту `8000` на Windows.
+- Если видите `fast_fallback`, проверьте наличие checkpoint и импорт `ml/predictor.py`.

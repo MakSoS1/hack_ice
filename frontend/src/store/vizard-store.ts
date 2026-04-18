@@ -7,6 +7,7 @@ interface VizardState {
   enabledLayers: Set<string>;
   toggleLayer: (id: string) => void;
   enableLayers: (ids: string[]) => void;
+  disableLayers: (ids: string[]) => void;
 
   selectedLayerId: string | null;
   selectLayer: (id: string | null) => void;
@@ -62,6 +63,12 @@ export const useVizard = create<VizardState>((set, get) => ({
       for (const id of ids) next.add(id);
       return { enabledLayers: next };
     }),
+  disableLayers: (ids) =>
+    set((s) => {
+      const next = new Set(s.enabledLayers);
+      for (const id of ids) next.delete(id);
+      return { enabledLayers: next };
+    }),
 
   selectedLayerId: "ice-concentration",
   selectLayer: (id) => set({ selectedLayerId: id, inspectorMode: id ? "layer" : "empty" }),
@@ -101,11 +108,8 @@ export const useVizard = create<VizardState>((set, get) => ({
       };
       if (status === "completed" && layerId) {
         next.activeLayerId = layerId;
-        next.aiView = "reconstruction";
         const layers = new Set(s.enabledLayers);
-        layers.add("ai-reconstructed");
-        layers.add("ai-confidence");
-        layers.add("ai-diff");
+        layers.add("ai-observed");
         next.enabledLayers = layers;
       }
       return next as VizardState;

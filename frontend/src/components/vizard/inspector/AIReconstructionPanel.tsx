@@ -6,6 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sparkles, BoxSelect, Maximize2, Loader2, AlertTriangle, Map, RefreshCw } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { getReconstructionJob } from "@/lib/api-client";
+import { LayerListItem } from "@/lib/api-types";
 import {
   useCreateReconstructionJobMutation,
   useLayerSummaryQuery,
@@ -73,8 +75,9 @@ export function AIReconstructionPanel({ compact }: { compact?: boolean } = {}) {
   } = useVizard();
 
   const [historyWindow, setHistoryWindow] = useState("7");
-  const [modelMode, setModelMode] = useState("balanced");
+  const [modelMode, setModelMode] = useState("fast");
   const [sceneId, setSceneId] = useState<string | null>(null);
+  const [isPreparingDemo, setIsPreparingDemo] = useState(false);
 
   const scenesQuery = useScenesQuery();
   const createMutation = useCreateReconstructionJobMutation();
@@ -123,17 +126,58 @@ export function AIReconstructionPanel({ compact }: { compact?: boolean } = {}) {
     setAiJob(created.job_id, sceneId);
   }
 
-  function handleUsePreparedDemo() {
-    const layers = recentLayersQuery.data?.layers ?? [];
-    if (layers.length === 0) return;
-    const sameSceneLayers = sceneId ? layers.filter((l) => l.scene_id === sceneId) : [];
-    const pickFrom = sameSceneLayers.length > 0 ? sameSceneLayers : layers;
-    const best =
-      pickFrom.find((l) => {
-        const mode = (l.summary?.model_mode_effective as string | undefined) ?? "";
-        return mode === "balanced" || mode === "precise";
-      }) ?? pickFrom[0];
-    activateReconstructedLayer(best.layer_id);
+  function layerMode(layer: LayerListItem): string {
+    const raw = layer.summary?.["model_mode_effective"];
+    return typeof raw === "string" ? raw.toLowerCase() : "";
+  }
+
+  async function waitForJobLayer(jobId: string, timeoutMs = 75_000): Promise<string | null> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const status = await getReconstructionJob(jobId);
+      setAiStatus(status.status, status.progress, status.layer_id);
+      if (status.status === "completed") return status.layer_id;
+      if (status.status === "failed") {
+        throw new Error(status.error ?? "AI reconstruction failed");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
+    return null;
+  }
+
+  async function handleUsePreparedDemo() {
+    if (!sceneId || isPreparingDemo || createMutation.isPending) return;
+    setIsPreparingDemo(true);
+    setModelMode("fast");
+    setHistoryWindow("3");
+    try {
+      const refreshed = await recentLayersQuery.refetch();
+      const layers = refreshed.data?.layers ?? recentLayersQuery.data?.layers ?? [];
+      const sameSceneLayers = layers.filter((l) => l.scene_id === sceneId);
+      const pickFrom = sameSceneLayers.length > 0 ? sameSceneLayers : layers;
+      const fastReady = pickFrom.find((l) => layerMode(l).startsWith("fast"));
+      if (fastReady) {
+        activateReconstructedLayer(fastReady.layer_id);
+        return;
+      }
+
+      const created = await createMutation.mutateAsync({
+        scene_id: sceneId,
+        history_steps: 1,
+        model_mode: "fast",
+        force_recompute: false,
+      });
+      setAiJob(created.job_id, sceneId);
+      const layerId = await waitForJobLayer(created.job_id);
+      if (layerId) {
+        activateReconstructedLayer(layerId);
+        await recentLayersQuery.refetch();
+      }
+    } catch (error) {
+      console.error("Failed to preload demo layer", error);
+    } finally {
+      setIsPreparingDemo(false);
+    }
   }
 
   function handleLoadMosaic() {
@@ -290,9 +334,9 @@ export function AIReconstructionPanel({ compact }: { compact?: boolean } = {}) {
             variant="outline"
             className="w-full mt-2 h-9"
             onClick={handleUsePreparedDemo}
-            disabled={recentLayersQuery.isLoading || !recentLayersQuery.data || recentLayersQuery.data.layers.length === 0}
+            disabled={recentLayersQuery.isLoading || !sceneId || aiRunning || createMutation.isPending || isPreparingDemo}
           >
-            Загрузить готовый демо-слой
+            {isPreparingDemo ? "Подгружаем быстрый демо-слой…" : "Загрузить готовый демо-слой (fast)"}
           </Button>
         </Section>
 

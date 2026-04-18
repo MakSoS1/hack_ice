@@ -134,6 +134,12 @@ If you have previous YOLO predictions (`<scene_id>.npy/.npz/.png`):
 .\.venv\Scripts\python.exe -m ml.benchmark --checkpoint .\backend\checkpoints\mvp_unet.pt --yolo-pred-dir <YOLO_PRED_DIR>
 ```
 
+Monte Carlo drift forecast (uses existing `storage/layers/*/route_grid.npz`):
+
+```powershell
+.\.venv\Scripts\python.exe -m ml.drift_forecast --n-sim 2000 --horizon 24 --dt 1 --mode inertial
+```
+
 ## Runtime model modes
 
 `POST /api/v1/reconstruction/jobs` supports:
